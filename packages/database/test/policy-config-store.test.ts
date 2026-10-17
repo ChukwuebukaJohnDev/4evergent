@@ -72,6 +72,26 @@ test("POLICY STORE (SQLite): version increments on each upsert", async () => {
   }
 });
 
+test("POLICY STORE (SQLite): upsert cannot transfer an agent policy to another owner", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "policy-test-"));
+  const store = new SQLitePolicyConfigStore(join(tmp, "test.db"));
+  try {
+    await store.upsert("agent-1", "owner-a", makePolicy("100"));
+
+    await assert.rejects(
+      store.upsert("agent-1", "owner-b", makePolicy("999")),
+      /owned by another user/
+    );
+
+    assert.equal((await store.getForOwner("agent-1", "owner-a"))?.maxTxAmount.XLM, "100");
+    assert.equal(await store.getForOwner("agent-1", "owner-b"), null);
+    assert.equal((await store.getWithMetadata("agent-1"))?.version, 1);
+  } finally {
+    store.close();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("POLICY STORE (SQLite): persistence survives store restart", async () => {
   const tmp = mkdtempSync(join(tmpdir(), "policy-test-"));
   const dbPath = join(tmp, "test.db");
@@ -194,6 +214,20 @@ test("POLICY STORE (InMemory): version increments on each upsert", async () => {
 
   const metadata = await store.getWithMetadata("agent-1");
   assert.equal(metadata?.version, 2);
+});
+
+test("POLICY STORE (InMemory): upsert cannot transfer an agent policy to another owner", async () => {
+  const store = new InMemoryPolicyConfigStore();
+  await store.upsert("agent-1", "owner-a", makePolicy("100"));
+
+  await assert.rejects(
+    store.upsert("agent-1", "owner-b", makePolicy("999")),
+    /owned by another user/
+  );
+
+  assert.equal((await store.getForOwner("agent-1", "owner-a"))?.maxTxAmount.XLM, "100");
+  assert.equal(await store.getForOwner("agent-1", "owner-b"), null);
+  assert.equal((await store.getWithMetadata("agent-1"))?.version, 1);
 });
 
 test("POLICY STORE (InMemory): getForOwner enforces ownership", async () => {
