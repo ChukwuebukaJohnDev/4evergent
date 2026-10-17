@@ -99,11 +99,11 @@ describe('Submit', () => {
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
+      expect(screen.getByLabelText('Agent')).toBeInDocument();
     });
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
-    fireEvent.change(screen.getByLabelText('Destination (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRP' } });
+    fireEvent.change(screen.getByLabelText('Destination (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQSS' } });
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Monthly payment' } });
     fireEvent.click(screen.getByRole('button', { name: 'Submit Intent' }));
 
@@ -114,35 +114,36 @@ describe('Submit', () => {
     expect(screen.queryByText('View activity')).not.toBeInDocument();
   });
 
-  test('associates every form input with a label or aria-label', async () => {
-    renderSubmit();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
-    });
-
-    expect(screen.getByLabelText('Intent Type')).toBeInTheDocument();
-    expect(screen.getByLabelText('Amount')).toBeInTheDocument();
-    expect(screen.getByLabelText('Destination (Stellar G...)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Reason')).toBeInTheDocument();
-  });
-
-  test('renders submit errors in a role="alert" banner', async () => {
-    mockSubmitPayment.mockRejected(new Error('submit failed'));
+  test('renders error banner with role="alert" when submit fails', async () => {
+    mockSubmitPayment.mockRejected(new Error('Insufficient funds'));
 
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
+      expect(screen.getByLabelText('Agent')).toBeInDocument();
     });
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
-    fireEvent.change(screen.getByLabelText('Destination (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRP' } });
+    fireEvent.change(screen.getByLabelText('Destination (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRS' } });
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Monthly payment' } });
     fireEvent.click(screen.getByRole('button', { name: 'Submit Intent' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toBeInDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('Insufficient funds');
     });
+  });
+
+  test('every form input has an associated label', async () => {
+    renderSubmit();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent')).toBeInDocument();
+    });
+
+    expect(screen.getByLabelText('Intent Type')).toBeInDocument();
+    expect(screen.getByLabelText('Asset')).toBeInTheDocument();
+    expect(screen.getByLabelText('Amount')).toBeInDocument();
+    expect(screen.getByLabelText('Destination (Stellar G...)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reason')).toBeInDocument();
   });
 });

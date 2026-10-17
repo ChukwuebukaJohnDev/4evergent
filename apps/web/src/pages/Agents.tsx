@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef , useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import type { AgentRecord } from '../types';
@@ -15,7 +15,7 @@ export default function Agents() {
   const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
   const modalRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const titleId = 'create-agent-title';
 
   const load = () => {
     api.listAgents()
@@ -29,13 +29,14 @@ export default function Agents() {
     if (!showCreate) return;
     const modal = modalRef.current;
     if (!modal) return;
-    const focusable = modal.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    );
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
+    const focusable = () =>
+      Array.from(
+        modal.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+    const first = focusable()[0];
     first?.focus();
-
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -43,24 +44,20 @@ export default function Agents() {
         return;
       }
       if (e.key !== 'Tab') return;
-      if (focusable.length === 0) return;
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
+      const items = focusable();
+      if (items.length === 0) return;
+      const firstEl = items[0];
+      const lastEl = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      } else if (!e.shiftKey && document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
       }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      triggerRef.current?.focus();
-    };
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [showCreate]);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -94,7 +91,7 @@ export default function Agents() {
           <h1>Agents</h1>
           <p className="muted">Configure and manage your financial agents.</p>
         </div>
-        <button ref={triggerRef} className="btn btn-primary" onClick={() => setShowCreate(true)}>
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)} aria-haspopup="dialog">
           Create Agent
         </button>
       </div>
@@ -133,15 +130,8 @@ export default function Agents() {
 
       {showCreate && (
         <div className="modal-backdrop" onClick={() => setShowCreate(false)}>
-          <div
-            ref={modalRef}
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="create-agent-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="create-agent-title">Create Agent</h2>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={modalRef} onClick={(e) => e.stopPropagation()}>
+            <h2 id={titleId}>Create Agent</h2>
             <form onSubmit={handleCreate}>
               <div className="field">
                 <label htmlFor="agent-name">Name</label>

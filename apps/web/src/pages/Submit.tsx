@@ -148,7 +148,8 @@ export default function Submit() {
             {assetCode === 'other' && (
               <div className="field">
                 <label htmlFor="asset-code">Asset Code</label>
-                <input id="asset-code" type="text" value={assetCode === 'other' ? '' : assetCode} onChange={(e) => setAssetCode(e.target.value)} placeholder="e.g. USDC" className="input" />
+                <input id="asset-code" type="text" value={assetCode === 'other' ? '' : assetCode} onChange={(e) => setAssetCode(e.target.value)} placeholder="e.g. USDC" className="input" aria-describedby="asset-code-hint" />
+                <div id="asset-code-hint" className="field-hint">Enter the asset code, e.g. USDC.</div>
               </div>
             )}
             {assetCode !== 'XLM' && (
