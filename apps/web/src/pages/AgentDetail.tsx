@@ -53,7 +53,7 @@ function StatusControls({
     return (
       <div className="status-controls">
         <span className="muted">Disabled agents cannot be re-enabled.</span>
-        {error && <div className="error">{error}</div>}
+        {error && <div className="error" role="alert">{error}</div>}
       </div>
     );
   }
@@ -80,7 +80,7 @@ function StatusControls({
           </button>
         </>
       )}
-      {error && <div className="error">{error}</div>}
+      {error && <div className="error" role="alert">{error}</div>}
     </div>
   );
 }
@@ -285,16 +285,16 @@ function PolicySettings({ agentId }: { agentId: string }) {
   };
 
   if (loading) return <Skeleton label="Loading policy..." />;
-  if (error && !form) return <div className="error">{error}</div>;
-  if (!form) return <div className="error">Unable to load policy</div>;
+  if (error && !form) return <div className="error" role="alert">{error}</div>;
+  if (!form) return <div className="error" role="alert">Unable to load policy</div>;
 
   const isDirty =
     policy && JSON.stringify(form) !== JSON.stringify(policy);
 
   return (
     <form onSubmit={handleSave} className="policy-form">
-      {error && <div className="error">{error}</div>}
-      {success && <div className="success">{success}</div>}
+      {error && <div className="error" role="alert">{error}</div>}
+      {success && <div className="success" role="status">{success}</div>}
 
       <div className="policy-section">
         <h3>Limits</h3>
@@ -302,6 +302,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           <label>
             <span>Max Transaction Amount (XLM)</span>
             <input
+              id="policy-max-tx-xlm"
               type="number"
               step="0.0000001"
               min="0"
@@ -314,6 +315,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           <label>
             <span>Daily Spending Limit (XLM)</span>
             <input
+              id="policy-daily-limit-xlm"
               type="number"
               step="0.0000001"
               min="0"
@@ -326,6 +328,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           <label>
             <span>Approval Threshold (XLM)</span>
             <input
+              id="policy-approval-threshold"
               type="number"
               step="0.0000001"
               min="0"
@@ -338,6 +341,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           <label>
             <span>Require Human Approval Above (XLM)</span>
             <input
+              id="policy-require-human-approval-above"
               type="number"
               step="0.0000001"
               min="0"
@@ -356,13 +360,14 @@ function PolicySettings({ agentId }: { agentId: string }) {
           {form.allowedAssets.map((asset) => (
             <span key={asset} className="chip">
               {asset}
-              <button type="button" className="chip-remove" onClick={() => removeListItem('allowedAssets', asset)}>×</button>
+              <button type="button" className="chip-remove" aria-label={`Remove allowed asset ${asset}`} onClick={() => removeListItem('allowedAssets', asset)}>×</button>
             </span>
           ))}
         </div>
         <div className="inline-input">
           <input
             type="text"
+            aria-label="Add allowed asset"
             placeholder="Add asset (e.g. USDC)"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -383,13 +388,14 @@ function PolicySettings({ agentId }: { agentId: string }) {
           {form.allowedDestinations.map((dest) => (
             <span key={dest} className="chip">
               {dest}
-              <button type="button" className="chip-remove" onClick={() => removeListItem('allowedDestinations', dest)}>×</button>
+              <button type="button" className="chip-remove" aria-label={`Remove allowed destination ${dest}`} onClick={() => removeListItem('allowedDestinations', dest)}>×</button>
             </span>
           ))}
         </div>
         <div className="inline-input">
           <input
             type="text"
+            aria-label="Add allowed destination"
             placeholder="Add destination (G...)"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -408,6 +414,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
         <div className="checkbox-grid">
           <label className="checkbox-label">
             <input
+              id="policy-op-payment"
               type="checkbox"
               checked={form.txTypeRestrictions.payment ?? false}
               onChange={(e) => updateForm({ txTypeRestrictions: { ...form.txTypeRestrictions, payment: e.target.checked } })}
@@ -416,6 +423,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           </label>
           <label className="checkbox-label">
             <input
+              id="policy-op-trustline"
               type="checkbox"
               checked={form.txTypeRestrictions.trustline ?? false}
               onChange={(e) => updateForm({ txTypeRestrictions: { ...form.txTypeRestrictions, trustline: e.target.checked } })}
@@ -424,6 +432,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           </label>
           <label className="checkbox-label">
             <input
+              id="policy-op-contract-call"
               type="checkbox"
               checked={form.txTypeRestrictions.contract_call ?? false}
               onChange={(e) => updateForm({ txTypeRestrictions: { ...form.txTypeRestrictions, contract_call: e.target.checked } })}
@@ -432,6 +441,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           </label>
           <label className="checkbox-label">
             <input
+              id="policy-op-account-settings"
               type="checkbox"
               checked={form.txTypeRestrictions.account_settings ?? false}
               onChange={(e) => updateForm({ txTypeRestrictions: { ...form.txTypeRestrictions, account_settings: e.target.checked } })}
@@ -521,7 +531,7 @@ export default function AgentDetail() {
         {spending === null && spendingError === null ? (
           <Skeleton label="Loading spending..." />
         ) : spendingError ? (
-          <div className="error">{spendingError}</div>
+          <div className="error" role="alert">{spendingError}</div>
         ) : spending && Object.keys(spending).length > 0 ? (
           <div className="spending-overview">
             {Object.entries(spending).map(([asset, data]) => (
@@ -561,7 +571,7 @@ export default function AgentDetail() {
       </div>
       <div className="block">
         <h2>Schedules</h2>
-        {scheduleError && <div className="error">{scheduleError}</div>}
+        {scheduleError && <div className="error" role="alert">{scheduleError}</div>}
         <ScheduleManagement agentId={agentId} onError={setScheduleError} />
       </div>
       <div className="block">

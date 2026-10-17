@@ -29,13 +29,13 @@ function renderSubmit() {
 describe('Submit', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockListAgents.mockResolvedValue({
+    mockListAgents.mockResolved({
       agents: [{ id: 'agent-1', displayName: 'Test Agent' }],
     });
   });
 
   test('shows View activity link after successful payment submit', async () => {
-    mockSubmitPayment.mockResolvedValue({
+    mockSubmitPayment.mockResolved({
       activityId: 'act-123',
       approvalId: 'appr-456',
       status: 'pending_approval',
@@ -44,7 +44,7 @@ describe('Submit', () => {
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
+      expect(screen.getByLabelText('Agent')).toBeInDocument();
     });
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
@@ -63,7 +63,7 @@ describe('Submit', () => {
   });
 
   test('shows View activity link after successful trustline submit', async () => {
-    mockSubmitTrustline.mockResolvedValue({
+    mockSubmitTrustline.mockResolved({
       activityId: 'act-789',
       status: 'pending',
     });
@@ -71,12 +71,12 @@ describe('Submit', () => {
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
+      expect(screen.getByLabelText('Agent')).toBeInDocument();
     });
 
     fireEvent.change(screen.getByLabelText('Intent Type'), { target: { value: 'trustline' } });
     fireEvent.change(screen.getByLabelText('Asset Code'), { target: { value: 'USDC' } });
-    fireEvent.change(screen.getByLabelText('Issuer (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQ' } });
+    fireEvent.change(screen.getByLabelText('Issuer (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRS' } });
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Add trustline' } });
     fireEvent.click(screen.getByRole('button', { name: 'Submit Intent' }));
 
@@ -91,7 +91,7 @@ describe('Submit', () => {
   });
 
   test('does not show View activity link when activityId is missing', async () => {
-    mockSubmitPayment.mockResolvedValue({
+    mockSubmitPayment.mockResolved({
       activityId: '',
       status: 'pending',
     });
@@ -103,7 +103,7 @@ describe('Submit', () => {
     });
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
-    fireEvent.change(screen.getByLabelText('Destination (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQ' } });
+    fireEvent.change(screen.getByLabelText('Destination (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRP' } });
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Monthly payment' } });
     fireEvent.click(screen.getByRole('button', { name: 'Submit Intent' }));
 
@@ -111,6 +111,38 @@ describe('Submit', () => {
       expect(screen.getByText(/Intent submitted/)).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('View activity')).not.toBeInTheDocument();
+    expect(screen.queryByText('View activity')).not.toBeInDocument();
+  });
+
+  test('associates every form input with a label or aria-label', async () => {
+    renderSubmit();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText('Intent Type')).toBeInTheDocument();
+    expect(screen.getByLabelText('Amount')).toBeInTheDocument();
+    expect(screen.getByLabelText('Destination (Stellar G...)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reason')).toBeInTheDocument();
+  });
+
+  test('renders submit errors in a role="alert" banner', async () => {
+    mockSubmitPayment.mockRejected(new Error('submit failed'));
+
+    renderSubmit();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Destination (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRP' } });
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Monthly payment' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Intent' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInDocument();
+    });
   });
 });

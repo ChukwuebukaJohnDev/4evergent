@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import type { AgentRecord } from '../types';
@@ -14,6 +14,8 @@ export default function Agents() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const modalRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const load = () => {
     api.listAgents()
@@ -22,6 +24,44 @@ export default function Agents() {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!showCreate) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    const focusable = modal.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    first?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowCreate(false);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      if (focusable.length === 0) return;
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      triggerRef.current?.focus();
+    };
+  }, [showCreate]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,7 +94,7 @@ export default function Agents() {
           <h1>Agents</h1>
           <p className="muted">Configure and manage your financial agents.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+        <button ref={triggerRef} className="btn btn-primary" onClick={() => setShowCreate(true)}>
           Create Agent
         </button>
       </div>
@@ -93,8 +133,15 @@ export default function Agents() {
 
       {showCreate && (
         <div className="modal-backdrop" onClick={() => setShowCreate(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Create Agent</h2>
+          <div
+            ref={modalRef}
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-agent-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="create-agent-title">Create Agent</h2>
             <form onSubmit={handleCreate}>
               <div className="field">
                 <label htmlFor="agent-name">Name</label>
@@ -134,7 +181,7 @@ export default function Agents() {
                 <div className="field-hint">Capabilities this agent can execute.</div>
               </div>
 
-              {createError && <div className="error-banner">{createError}</div>}
+              {createError && <div className="error-banner" role="alert">{createError}</div>}
 
               <div className="form-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowCreate(false)} disabled={creating}>Cancel</button>

@@ -89,10 +89,11 @@ export default function Submit() {
         </div>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && <div className="error-banner" role="alert">{error}</div>}
       {result && (
         <div
           className="success-banner"
+          role="status"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -184,8 +185,8 @@ export default function Submit() {
 
         <div className="field">
           <label htmlFor="reason">Reason</label>
-          <input id="reason" type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Monthly payment" className="input" />
-          <div className="field-hint">Minimum 3 characters. Describes the purpose of this intent.</div>
+          <input id="reason" type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Monthly payment" className="input" aria-describedby="reason-hint" />
+          <div id="reason-hint" className="field-hint">Minimum 3 characters. Describes the purpose of this intent.</div>
         </div>
 
         <div className="form-actions">
