@@ -194,3 +194,16 @@ Machine clients are unchanged: `API_KEYS` maps a bearer secret to exactly one se
 **Decision:** None yet. The options are per-IP throttling in front of the API (reverse proxy), an in-process counter keyed by IP/account, or deferring to an edge/WAF rule. No answer is recorded here because the deployment topology that would decide it (single process vs. multiple instances, whether a proxy already terminates this) is not fixed.
 
 **Consequences:** Until this is decided, operators should treat the auth endpoints as untrusted-input surfaces and place a rate limit in front of them. Any decision recorded here must state whether the limit is per-IP, per-account, or both, and whether a lockout is permanent or time-boxed — a permanent lockout is itself a denial-of-service vector.
+
+## ADR-021: Capability discovery uses exact, case-sensitive match semantics
+
+**Status:** Accepted
+
+**Context:** Phase 7 capability discovery introduces `GET /agents?capability=<name>` and `AgentStore.listByCapability(ownerId, capability, limit)`. Capabilities are stored as JSON string arrays in `capabilities_json`. We must determine whether capability discovery matches exact strings, substrings, or prefixes, and whether matching is case-sensitive.
+
+**Decision:** Capability discovery enforces exact, case-sensitive string matching across both `InMemoryAgentStore` and `SQLiteAgentStore`. In SQLite, matching is executed via `EXISTS (SELECT 1 FROM json_each(agents.capabilities_json) WHERE value = ?)` with default binary collation; in `InMemoryAgentStore`, matching is executed via `Array.prototype.includes()`.
+
+**Consequences:**
+- Substrings and prefixes (such as `pay` matching `payment` or `payroll`) are not supported, preventing ambiguous matches in automated multi-agent negotiation.
+- Case-sensitivity (`payment` != `Payment`) enforces consistent identifier conventions and avoids locale-dependent casing inconsistencies.
+- Store-level execution preserves owner isolation (`owner_id = ?`) and applies limits after capability filtering rather than truncating before filtering.
