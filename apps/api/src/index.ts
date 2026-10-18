@@ -677,7 +677,7 @@ export async function createApiServer(options: ServerOptions) {
       return handlePutPolicy(requestScopedCtx, req, res);
     }
 
-    if (method === "GET" && url === "/agents") {
+    if (method === "GET" && /^\/agents(\?.*)?$/.test(url)) {
       return handleListAgents(requestScopedCtx, req, res);
     }
     if (method === "GET" && /^\/agents\/[^/]+$/.test(url)) {
@@ -751,8 +751,18 @@ export async function createApiServer(options: ServerOptions) {
     }); // End runRequestIdContext
   });
 
-  async function handleListAgents(ctx: RequestContext, _req: any, res: any) {
-    const all = await agentStore.listByOwner(ctx.ownerId!);
+  async function handleListAgents(ctx: RequestContext, req: any, res: any) {
+    const urlObj = new URL(req.url ?? "", "http://localhost");
+    const capability = urlObj.searchParams.get("capability");
+    const hasLimit = urlObj.searchParams.has("limit");
+    const limit = hasLimit
+      ? Math.max(1, Math.min(200, Number(urlObj.searchParams.get("limit") ?? 50) || 50))
+      : undefined;
+
+    const all = capability !== null
+      ? await agentStore.listByCapability(ctx.ownerId!, capability, limit)
+      : await agentStore.listByOwner(ctx.ownerId!, limit);
+
     const agentList = all.map((a) => ({
       id: a.id,
       displayName: a.displayName,
