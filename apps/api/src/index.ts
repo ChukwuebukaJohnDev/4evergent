@@ -1219,6 +1219,10 @@ export async function createApiServer(options: ServerOptions) {
     const schedule = await schedules.get(scheduleId);
     if (!schedule) return json(res, { error: "not found" }, 404);
 
+    if (!SCHEDULE_TRANSITIONS[schedule.status]?.includes(action)) {
+      return json(res, { error: `cannot ${action} schedule in status '${schedule.status}'` }, 409);
+    }
+
     const status = action === "pause" ? "paused" : action === "resume" ? "active" : "disabled";
     const updated = await schedules.update(scheduleId, { status });
     return json(res, { schedule: updated });
@@ -1736,6 +1740,18 @@ function makeActivity(
     updatedAt: now,
   };
 }
+
+/**
+ * Legal schedule actions per current status. No-ops (pause when paused,
+ * resume when active, disable when disabled) are rejected so callers get a
+ * signal that nothing changed. `disabled` stays reversible via resume,
+ * matching the dashboard's Resume button for disabled schedules.
+ */
+const SCHEDULE_TRANSITIONS: Record<string, ReadonlyArray<"pause" | "resume" | "disable">> = {
+  active: ["pause", "disable"],
+  paused: ["resume", "disable"],
+  disabled: ["resume"],
+};
 
 function json(res: any, body: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json" });

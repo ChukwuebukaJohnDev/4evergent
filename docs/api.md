@@ -398,6 +398,22 @@ Delete a schedule. `200` → `{ "deleted": true }`.
 Transition schedule status (`paused` / `active` / `disabled`).
 `200` → `{ "schedule" }`.
 
+The current status is validated before writing. A transition that is not
+legal, including a no-op, returns `409` with
+`{ "error": "cannot <action> schedule in status '<current>'" }` and the
+schedule is left unchanged. No-ops are rejected rather than treated as
+idempotent so callers get a signal that nothing changed.
+
+| Current status | pause | resume | disable |
+|---|---|---|---|
+| `active` | `200` (paused) | `409` | `200` (disabled) |
+| `paused` | `409` | `200` (active) | `200` (disabled) |
+| `disabled` | `409` | `200` (active) | `409` |
+
+`disabled` is reversible: `resume` is accepted from `disabled`, which matches
+the dashboard's Resume button. Making it terminal would be a design decision
+for the maintainers (see #6 and #7 for the agent-side equivalent).
+
 ### Missed schedule runs
 
 An occurrence due now or no more than five minutes ago follows the normal
