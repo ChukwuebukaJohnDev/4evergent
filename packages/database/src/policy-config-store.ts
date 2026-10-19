@@ -77,17 +77,23 @@ export class SQLitePolicyConfigStore implements PolicyConfigStore {
   async upsert(agentId: string, ownerId: string, rules: PolicyRules): Promise<{ rules: PolicyRules; version: number }> {
     const now = new Date().toISOString();
     const existing = this.db
-      .prepare("SELECT version FROM policy_configs WHERE agent_id = ?")
-      .get(agentId) as { version: number } | undefined;
+      .prepare("SELECT owner_id, version FROM policy_configs WHERE agent_id = ?")
+      .get(agentId) as { owner_id: string; version: number } | undefined;
 
     let newVersion: number;
     if (existing) {
+      if (existing.owner_id !== ownerId) {
+        throw new Error(`Policy config for agent ${agentId} is owned by another user`);
+      }
       newVersion = existing.version + 1;
-      this.db
+      const update = this.db
         .prepare(
-          `UPDATE policy_configs SET rules_json = ?, owner_id = ?, version = ?, updated_at = ? WHERE agent_id = ?`
+          `UPDATE policy_configs SET rules_json = ?, version = ?, updated_at = ? WHERE agent_id = ? AND owner_id = ?`
         )
-        .run(JSON.stringify(rules), ownerId, newVersion, now, agentId);
+        .run(JSON.stringify(rules), newVersion, now, agentId, ownerId);
+      if (update.changes === 0) {
+        throw new Error(`Policy config for agent ${agentId} is owned by another user`);
+      }
     } else {
       newVersion = 1;
       this.db
