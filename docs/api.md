@@ -17,7 +17,7 @@ All endpoints except `GET /health` require authentication.
   See [security-model.md](security-model.md) — API Authentication.
 
 Unauthenticated requests to protected endpoints return
-`{"error":"unauthorized"}` with status `401`.
+`{"code":"UNAUTHORIZED","error":"unauthorized"}` with status `401`.
 
 ## User Authentication (Browser Sessions)
 
@@ -111,10 +111,36 @@ authenticated `ownerId`. Access to another owner's resource returns
 
 ## General error behavior
 
-Errors are ad-hoc JSON — most follow `{"error": "<message>"}` with an
-appropriate 4xx/5xx status, but some endpoints return message-shaped
-bodies (noted where they differ). Unknown paths return
-`{"error":"not found"}` with `404`. Request bodies are limited to 1 MB.
+Every error response is JSON of the form `{"code": "<CODE>", "error": "<message>"}`
+with an appropriate 4xx/5xx status. `code` is the stable, machine-readable
+contract; `error` is human-readable and may change. `VALIDATION_ERROR` may also
+carry a `details` field with field-specific messages. Unknown paths return
+`{"code":"NOT_FOUND","error":"Not found"}` with `404`. Some endpoints return
+message-shaped bodies (noted where they differ). Request bodies are limited to 1 MB.
+
+### Error codes
+
+| Code | HTTP | Description |
+|---|---|---|
+| `UNAUTHORIZED` | 401 | Missing or invalid credentials. |
+| `CSRF_FAILED` | 403 | Session request failed the CSRF header check. |
+| `NOT_FOUND` | 404 | Unknown route. |
+| `AGENT_NOT_FOUND` | 404 | The agent does not exist or is not owned by the caller. |
+| `APPROVAL_NOT_FOUND` | 404 | The approval does not exist or is not owned by the caller. |
+| `EXECUTION_NOT_FOUND` | 404 | The execution does not exist or is not owned by the caller. |
+| `SCHEDULE_NOT_FOUND` | 404 | The schedule does not exist or is not owned by the caller. |
+| `ACTIVITY_NOT_FOUND` | 404 | The activity record does not exist or is not owned by the caller. |
+| `EXECUTION_QUEUE_DISABLED` | 404 | The execution queue is not enabled on this server. |
+| `INVALID_PATH_PARAM` | 400 | A path identifier is missing or malformed. |
+| `INVALID_JSON` | 400 | The request body is not valid JSON. |
+| `VALIDATION_ERROR` | 400 | A field failed validation; see message and optional details. |
+| `RAW_TRANSACTION_REJECTED` | 400 | Raw transaction payloads are not accepted. |
+| `IDEMPOTENCY_KEY_INVALID` | 400 | The Idempotency-Key header is too long. |
+| `IDEMPOTENCY_CONFLICT` | 409 | The Idempotency-Key was already used with a different intent. |
+| `AGENT_NOT_ACTIVE` | 409 | The agent is paused or disabled. |
+| `INVALID_EXECUTION_STATE` | 409 | The execution status does not allow the requested action. |
+| `MAX_RETRIES_REACHED` | 409 | The execution has used all retry attempts. |
+| `EXECUTION_CONFLICT` | 409 | The execution changed concurrently. |
 
 ---
 
@@ -443,7 +469,7 @@ Cancel a `queued` or `executing` execution. Requires the queue.
 
 Queue summary for the caller's executions. Returns
 `{ "running": boolean, "byStatus": Record<string, number> }`.
-`404` with `{"error":"execution queue not enabled"}` if the queue is off.
+`404` with `{"code":"EXECUTION_QUEUE_DISABLED",...}` if the queue is off.
 
 ---
 
