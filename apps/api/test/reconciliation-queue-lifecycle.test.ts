@@ -1,321 +1,355 @@
 /**
- * Integration test: reconciler + execution queue lifecycle together.
+ * Integration test: transaction status reconciler + execution queue lifecycle
+ * on the same execution record.
  *
  * Ownership contract (the contract this test enforces):
- *   - The execution queue (apps/api/src/execution-queue.ts) owns the claim and
- *     the attempt/retry lifecycle: queued -> executing -> submitted, and the
- *     transition from failed -> queued -> ... -> dead_letter once attempts
- *     are exhausted.
- *   - The transaction status reconciler (packages/stellar/src/reconciler.ts)
- *     owns the network-status transitions for a submitted record:
- *     submitted -> confirmed / failed, and leaves the record submitted for
- *     not_found / network_error.
+ *   - The execution queue (`apps/api/src/execution-queue.ts`) owns the claim and
+ *     attempt lifecycle: queued -> executing -> submitted, and failed ->
+ *     queued/executing -> ... -> dead_letter once attempts are exhausted.
+ *   - The transaction status reconciler (`packages/stellar/src/reconciler.ts`)
+ *     owns the network-status transitions for a submitted record: submitted ->
+ *     confirmed / failed, and leaves the record submitted for not_found /
+ *     network_error.
  *
- * The two mechanisms meet on the same record. This test drives both together,
- * with a deterministic fake status provider and explicit `processDue()`
- * calls (no real timers).
+ * The two mechanisms meet on the same record, so the test drives the *real*
+ * `ExecutionQueue` and the *real* `TransactionStatusReconciler` over one
+ * `InMemoryExecutionStore`, with a scripted pipeline executor and a
+ * deterministic status provider. No HTTP server and no real timers are
+ * involved: every pass is an explicit `processDue()` / `reconcile()` call, so
+ * the assertions are not timing-dependent.
+ *
+ * This mirrors the established harness in `execution-queue-integration.test.ts`
+ * (direct construction of the queue over an in-memory store) rather than the
+ * application server, because executions are created by the approval and
+ * schedule paths — there is no `POST /executions` route to drive.
  */
 
-import { test, before, after } from 'node:test';
-import assert from 'node:assert';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { test } from "node:test";
+import assert from "node:assert/strict";
 
-import { createApp } from '../src/index.js';
-import type { AppOptions } from '../src/index.js';
-import type { ExecutionQueue } from '../src/execution-queue.js';
-import type { TransactionStatusReconciler } from '@4evergent/stellar/reconciler';
-import type {
-  TransactionStatusProvider,
-  TransactionStatusResult,
-} from '@4evergent/stellar/reconciler';
-import type { ExecutionRecord } from '@4evergent/database/execution-types';
+import { InMemoryExecutionStore } from "@4evergent/database";
+import type { ExecutionRecord } from "@4evergent/database";
+import type { AgentIntent } from "@4evergent/shared";
+import {
+  TransactionStatusReconciler,
+  type TransactionStatus,
+  type TransactionStatusProvider,
+} from "@4evergent/stellar";
+import { ExecutionQueue } from "../src/execution-queue.js";
 
 // -----------------------------------------------------------------------------
 // Fake status provider: deterministic, no network.
 // -----------------------------------------------------------------------------
 
 class FakeStatusProvider implements TransactionStatusProvider {
-  public calls: string[] = [];
-  private responses = new Map<string, TransactionStatusResult>();
-  private defaultResponse: TransactionStatusResult = { status: 'not_found' };
+  /** Every tx hash the reconciler asked about, in order. */
+  public readonly calls: string[] = [];
+  private readonly responses = new Map<string, TransactionStatus>();
+  private defaultResponse: TransactionStatus = "not_found";
 
-  set(hash: string, result: TransactionStatusResult): void {
+  /**
+   * Optional hook run *inside* `getStatus`, before it resolves. Tests use it to
+   * simulate a concurrent writer landing between the reconciler's read and its
+   * write.
+   */
+  public onStatus?: (txHash: string) => Promise<void> | void;
+
+  set(hash: string, result: TransactionStatus): void {
     this.responses.set(hash, result);
   }
 
-  setDefault(result: TransactionStatusResult): void {
+  setDefault(result: TransactionStatus): void {
     this.defaultResponse = result;
   }
 
-  async getStatus(txHash: string): Promise<TransactionStatusResult> {
+  async getStatus(txHash: string): Promise<TransactionStatus> {
     this.calls.push(txHash);
+    if (this.onStatus) await this.onStatus(txHash);
     return this.responses.get(txHash) ?? this.defaultResponse;
   }
 }
 
 // -----------------------------------------------------------------------------
-// HTTP test harness (local to this file).
+// Harness — one isolated store / queue / reconciler per test.
 // -----------------------------------------------------------------------------
 
-interface TestHarness {
-  baseUrl: string;
-  close: () => Promise<void>;
-  server: AppOptions['server'];
+/** What the scripted pipeline executor does on one pass. */
+type PipelineStep = "submitted" | "transient_failure";
+
+interface Harness {
+  store: InMemoryExecutionStore;
+  queue: ExecutionQueue;
+  reconciler: TransactionStatusReconciler;
+  provider: FakeStatusProvider;
+  /** Number of times the pipeline executor ran. */
+  executions: () => number;
+  /** Close everything this harness opened. */
+  stop: () => void;
 }
 
-async function startServer(options: AppOptions): Promise<TestHarness> {
-  const app = await createApp(options);
-  const server: Server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server.listen(0, '127.0.0.1', () => resolve());
+const RETRY_POLICY = { maxRetries: 2, baseDelayMs: 5_000, maxDelayMs: 5_000 };
+
+/**
+ * Build a fresh harness. The queue and reconciler are never `start()`ed: their
+ * timer loops would race the explicit passes this suite makes, and starting
+ * them would leave workers behind if an assertion failed mid-test. `stop()` is
+ * still called after every test so the resources are released deterministically.
+ */
+function makeHarness(steps: PipelineStep[] = []): Harness {
+  const store = new InMemoryExecutionStore();
+  const provider = new FakeStatusProvider();
+  let executed = 0;
+
+  const pipelineExecutor = async (
+    record: ExecutionRecord,
+  ): Promise<{
+    record: ExecutionRecord;
+    success: boolean;
+    status: string;
+    txHash?: string;
+    submittedHash?: string | null;
+    error?: string;
+    errorClass?: string;
+  }> => {
+    const step = steps[executed] ?? "submitted";
+    executed += 1;
+    if (step === "transient_failure") {
+      // "timeout" is one of the queue's TRANSIENT_PATTERNS, so this failure is
+      // retryable rather than immediately permanent.
+      throw new Error("horizon timeout while submitting");
+    }
+    const txHash = `tx-${executed}`;
+    return {
+      record,
+      success: true,
+      status: "submitted",
+      txHash,
+      submittedHash: txHash,
+      error: undefined,
+    };
+  };
+
+  const queue = new ExecutionQueue(
+    store,
+    pipelineExecutor,
+    async () => ({
+      accountId: () => "GACCOUNT",
+      sequenceNumber: () => "1",
+      incrementSequenceNumber: () => {},
+    }),
+    { intervalMs: 60_000, retryPolicy: RETRY_POLICY },
+  );
+
+  const reconciler = new TransactionStatusReconciler(store, provider, {
+    intervalMs: 60_000,
   });
-  const addr = server.address() as AddressInfo;
-  const baseUrl = `http://127.0.0.1:${addr.port}`;
+
   return {
-    baseUrl,
-    server: options.server,
-    close: () =>
-      new Promise<void>((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve())),
-      ),
+    store,
+    queue,
+    reconciler,
+    provider,
+    executions: () => executed,
+    stop: () => {
+      queue.stop();
+      reconciler.stop();
+    },
   };
 }
 
-// -----------------------------------------------------------------------------
-// Helpers.
-// -----------------------------------------------------------------------------
-
-async function getExecution(
-  baseUrl: string,
-  id: string,
-): Promise<ExecutionRecord | undefined> {
-  const res = await fetch(`${baseUrl}/executions/${id}`);
-  if (res.status === 404) return undefined;
-  assert.strictEqual(res.status, 200, `unexpected status ${res.status}`);
-  const body = (await res.json()) as { execution: ExecutionRecord };
-  return body.execution;
+function makeIntent(): AgentIntent {
+  return {
+    type: "payment",
+    asset: "XLM",
+    destination: "GDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    amount: "10",
+    reason: "reconciler/queue lifecycle test",
+  };
 }
 
-async function submitExecution(
-  baseUrl: string,
-  body: Record<string, unknown>,
+function makeExecution(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    ownerId: "owner-a",
+    agentId: "agent-a",
+    approvalId: "approval-a",
+    activityId: null,
+    intent: makeIntent(),
+    status: "queued",
+    policyDecision: null,
+    simulationResult: null,
+    txHash: null,
+    submittedHash: null,
+    error: null,
+    attempt: 0,
+    nextRetryAt: null,
+    startedAt: null,
+    completedAt: null,
+    errorClass: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+async function getRecord(
+  harness: Harness,
+  id: string,
 ): Promise<ExecutionRecord> {
-  const res = await fetch(`${baseUrl}/executions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  assert.strictEqual(res.status, 201, `body: ${await res.text()}`);
-  const json = (await res.json()) as { execution: ExecutionRecord };
-  return json.execution;
+  const record = await harness.store.get(id);
+  assert.ok(record, `execution ${id} must exist`);
+  return record;
+}
+
+/** Enqueue one execution and drive the queue once; returns the submitted record. */
+async function submitOnce(harness: Harness): Promise<ExecutionRecord> {
+  const execution = makeExecution();
+  await harness.queue.enqueue(execution);
+  await harness.queue.processDue();
+  const submitted = await getRecord(harness, execution.id);
+  assert.equal(submitted.status, "submitted");
+  assert.ok(submitted.txHash, "a submitted record must carry a tx hash");
+  return submitted;
 }
 
 // -----------------------------------------------------------------------------
 // Tests.
 // -----------------------------------------------------------------------------
 
-let tmpDir: string;
-let harness: TestHarness | undefined;
-let queue: ExecutionQueue | undefined;
-let reconciler: TransactionStatusReconciler | undefined;
-let provider: FakeStatusProvider;
+test("confirmed path: queue submits, then the reconciler confirms the same hash", async (t) => {
+  const harness = makeHarness();
+  t.after(() => harness.stop());
 
-before(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), 'reconciler-queue-'));
+  const submitted = await submitOnce(harness);
+  assert.equal(harness.executions(), 1);
+
+  harness.provider.set(submitted.txHash!, "confirmed");
+  const result = await harness.reconciler.reconcile();
+
+  assert.deepEqual(result, {
+    checked: 1,
+    confirmed: 1,
+    failed: 0,
+    skipped: 0,
+    errors: 0,
+  });
+
+  const final = await getRecord(harness, submitted.id);
+  assert.equal(final.status, "confirmed");
+  assert.equal(final.txHash, submitted.txHash, "confirmation must preserve the tx hash");
+  assert.equal(final.error, null);
+  assert.ok(final.completedAt, "a confirmed record must be completed");
 });
 
-after(async () => {
-  if (harness) {
-    await harness.close();
-    harness = undefined;
-  }
-  if (queue) {
-    queue.stop();
-    queue = undefined;
-  }
-  if (reconciler) {
-    reconciler.stop();
-    reconciler = undefined;
-  }
-  if (tmpDir) {
-    await rm(tmpDir, { recursive: true, force: true });
-  }
+test("failed path: reconciler fails the record, retries exhaust, then dead_letter", async (t) => {
+  const harness = makeHarness(["submitted", "transient_failure", "transient_failure"]);
+  t.after(() => harness.stop());
+
+  const submitted = await submitOnce(harness);
+
+  // Reconciler observes the on-chain failure and marks the record failed.
+  harness.provider.set(submitted.txHash!, "failed");
+  const reconciled = await harness.reconciler.reconcile();
+  assert.equal(reconciled.failed, 1);
+  const failed = await getRecord(harness, submitted.id);
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error, "Transaction failed on-chain");
+
+  // Retry attempt 1: the queue claims the failed record. The pipeline fails
+  // transiently, so the record stays failed with a backoff timestamp.
+  await harness.queue.processDue();
+  const retried = await getRecord(harness, submitted.id);
+  assert.equal(retried.status, "failed");
+  assert.equal(retried.attempt, 1);
+  assert.ok(retried.nextRetryAt, "a retryable failure must schedule a retry");
+  assert.notEqual(retried.status, "dead_letter");
+
+  // The backoff must gate the next attempt: not due at the current clock.
+  assert.equal(await harness.queue.processDue(), 0, "record must not be due yet");
+
+  // Past the backoff, attempt 2 exhausts maxRetries=2 -> dead_letter.
+  const afterBackoff = new Date(Date.now() + 60_000).toISOString();
+  assert.equal(await harness.queue.processDue(afterBackoff), 1);
+
+  const dead = await getRecord(harness, submitted.id);
+  assert.equal(dead.status, "dead_letter");
+  assert.equal(dead.attempt, 2);
+  assert.equal(dead.nextRetryAt, null);
+  assert.equal(harness.executions(), 3, "one submit + two failed retries");
 });
 
-async function bootstrap(): Promise<void> {
-  provider = new FakeStatusProvider();
-  const options: AppOptions = {
-    server: {
-      dataDir: tmpDir,
-      port: 0,
-    },
-    executionQueue: {
-      enabled: true,
-      intervalMs: 60000,
-      maxAttempts: 2,
-    },
-    reconciliation: {
-      enabled: true,
-      intervalMs: 60000,
-      instance: provider,
-    },
+test("not_found: record stays submitted and the queue never blind-retries it", async (t) => {
+  const harness = makeHarness();
+  t.after(() => harness.stop());
+
+  const submitted = await submitOnce(harness);
+
+  harness.provider.set(submitted.txHash!, "not_found");
+  const result = await harness.reconciler.reconcile();
+  assert.equal(result.checked, 1);
+  assert.equal(result.confirmed + result.failed, 0);
+
+  const after = await getRecord(harness, submitted.id);
+  assert.equal(after.status, "submitted");
+  assert.equal(after.txHash, submitted.txHash);
+
+  // Driving the queue again (even far past any backoff) must not re-submit.
+  const later = new Date(Date.now() + 60_000).toISOString();
+  assert.equal(await harness.queue.processDue(later), 0);
+  const afterQueue = await getRecord(harness, submitted.id);
+  assert.equal(afterQueue.status, "submitted");
+  assert.equal(afterQueue.txHash, submitted.txHash);
+  assert.equal(harness.executions(), 1);
+});
+
+test("network_error: record stays submitted and is not retried", async (t) => {
+  const harness = makeHarness();
+  t.after(() => harness.stop());
+
+  const submitted = await submitOnce(harness);
+
+  harness.provider.set(submitted.txHash!, "network_error");
+  const result = await harness.reconciler.reconcile();
+  assert.equal(result.checked, 1);
+  assert.equal(result.failed, 0);
+
+  const after = await getRecord(harness, submitted.id);
+  assert.equal(after.status, "submitted");
+  assert.equal(after.txHash, submitted.txHash);
+  assert.equal(after.error, null);
+});
+
+test("concurrent write: the reconciler does not overwrite a newer state (stale-write guard)", async (t) => {
+  const harness = makeHarness();
+  t.after(() => harness.stop());
+
+  const submitted = await submitOnce(harness);
+
+  // Synchronization seam: while the reconciler is awaiting the status provider
+  // for this record, another writer moves it submitted -> confirmed. The
+  // reconciler then reports "failed" and tries to write failed over the
+  // record it read as submitted. That conditional write must lose.
+  let concurrentWriteApplied = false;
+  harness.provider.set(submitted.txHash!, "failed");
+  harness.provider.onStatus = async (txHash) => {
+    if (txHash !== submitted.txHash || concurrentWriteApplied) return;
+    concurrentWriteApplied = true;
+    const updated = await harness.store.updateIfStatus(submitted.id, "submitted", {
+      status: "confirmed",
+      completedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    assert.ok(updated, "the concurrent write must win the race it starts first");
   };
-  harness = await startServer(options);
-  queue = harness.server.executionQueue;
-  reconciler = harness.server.reconciler;
-  assert.ok(queue, 'execution queue must be constructed');
-  assert.ok(reconciler, 'reconciler must be constructed');
-}
 
-test('confirmed path: queue submits, then reconciler confirms', async () => {
-  await bootstrap();
-  const created = await submitExecution(harness!.baseUrl, {
-    agentId: 'agent-101',
-    type: 'transfer',
-    params: { to: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', amount: '1' },
-  });
-  assert.strictEqual(created.status, 'queued');
+  const result = await harness.reconciler.reconcile();
+  assert.ok(concurrentWriteApplied, "the concurrent write must have happened");
+  assert.equal(result.checked, 1);
+  assert.equal(result.failed, 0, "the stale failed-write must not be counted as applied");
 
-  // Drive the queue explicitly -- no real timers.
-  await queue!.processDue();
-  const afterQueue = await getExecution(harness!.baseUrl, created.id);
-  assert.ok(afterQueue);
-  assert.strictEqual(afterQueue!.status, 'submitted');
-  const txHash = afterQueue!.txHash;
-  assert.ok(txHash, 'submitted record must have a tx hash');
-
-  // Reconciler confirms.
-  provider.set(txHash!, { status: 'confirmed', ledger: 12345 });
-  await reconciler!.processDue();
-
-  const final = await getExecution(harness!.baseUrl, created.id);
-  assert.ok(final);
-  assert.strictEqual(final!.status, 'confirmed');
-  assert.strictEqual(final!.txHash, txHash);
-});
-
-test('failed path: reconciler marks failed, queue retries, then dead_letter', async () => {
-  await bootstrap();
-  const created = await submitExecution(harness!.baseUrl, {
-    agentId: 'agent-202',
-    type: 'transfer',
-    params: { to: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', amount: '1' },
-  });
-
-  await queue!.processDue();
-  const submitted = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(submitted!.status, 'submitted');
-  const txHash = submitted!.txHash!;
-
-  // Reconciler observes failure.
-  provider.set(txHash, { status: 'failed', reason: 'tx_failed' });
-  await reconciler!.processDue();
-  const failed = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(failed!.status, 'failed');
-
-  // Queue retry policy applies: failed -> queued -> executing -> submitted.
-  await queue!.processDue();
-  const retried = await getExecution(harness!.baseUrl, created.id);
-  assert.ok(retried);
-  assert.notStrictEqual(retried!.status, 'dead_letter');
-
-  // Exhaust attempts: fail again and drive to dead_letter.
-  if (retried!.status === 'submitted') {
-    const newHash = retried!.txHash!;
-    provider.set(newHash, { status: 'failed', reason: 'tx_failed' });
-    await reconciler!.processDue();
-  }
-  await queue!.processDue();
-
-  const dead = await getExecution(harness!.baseUrl, created.id);
-  assert.ok(dead);
-  assert.strictEqual(dead!.status, 'dead_letter');
-});
-
-test('not_found: record stays submitted and is never blind-retried', async () => {
-  await bootstrap();
-  const created = await submitExecution(harness!.baseUrl, {
-    agentId: 'agent-303',
-    type: 'transfer',
-    params: { to: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', amount: '1' },
-  });
-  await queue!.processDue();
-  const submitted = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(submitted!.status, 'submitted');
-  const txHash = submitted!.txHash!;
-
-  provider.set(txHash, { status: 'not_found' });
-  await reconciler!.processDue();
-  const after = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(after!.status, 'submitted');
-  assert.strictEqual(after!.txHash, txHash);
-
-  // Driving the queue again must not blind-retry a submitted record.
-  await queue!.processDue();
-  const afterQueue = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(afterQueue!.status, 'submitted');
-  assert.strictEqual(afterQueue!.txHash, txHash);
-});
-
-test('network_error: record stays submitted', async () => {
-  await bootstrap();
-  const created = await submitExecution(harness!.baseUrl, {
-    agentId: 'agent-404',
-    type: 'transfer',
-    params: { to: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', amount: '1' },
-  });
-  await queue!.processDue();
-  const submitted = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(submitted!.status, 'submitted');
-  const txHash = submitted!.txHash!;
-
-  provider.set(txHash, { status: 'network_error', message: 'timeout' });
-  await reconciler!.processDue();
-  const after = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(after!.status, 'submitted');
-  assert.strictEqual(after!.txHash, txHash);
-});
-
-test('concurrent update: conditional write prevents a stale overwrite', async () => {
-  await bootstrap();
-  const created = await submitExecution(harness!.baseUrl, {
-    agentId: 'agent-505',
-    type: 'transfer',
-    params: { to: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', amount: '1' },
-  });
-  await queue!.processDue();
-  const submitted = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(submitted!.status, 'submitted');
-  const txHash = submitted!.txHash!;
-
-  // Simulate a concurrent write between the reconciler's read and its write.
-  // The record is moved to a newer state and the reconciler must not
-  // overwrite it with a stale 'confirmed'.
-  const store = harness!.server.executionStore;
-  const before = await store.getExecution(created.id);
-  assert.ok(before);
-  await store.updateExecution(created.id, {
-    status: 'confirmed',
-    txHash,
-    completedAt: new Date().toISOString(),
-  });
-
-  // Now a concurrent update attempts to move the record back to 'failed'.
-  // The conditional update must reject the stale write.
-  const ok = await store.updateExecutionIfMatches(created.id, {
-    status: 'submitted',
-  }, {
-    status: 'failed',
-    error: 'stale_write',
-  });
-  assert.strictEqual(ok, false, 'stale conditional write must be rejected');
-
-  const after = await getExecution(harness!.baseUrl, created.id);
-  assert.strictEqual(after!.status, 'confirmed');
-  assert.strictEqual(after!.txHash, txHash);
+  const after = await getRecord(harness, submitted.id);
+  assert.equal(after.status, "confirmed", "the newer state must be preserved");
+  assert.equal(after.txHash, submitted.txHash);
+  assert.equal(after.error, null, "no stale error may be written over the newer state");
 });
