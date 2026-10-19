@@ -80,6 +80,31 @@ export function clearAgents() {
   agents.clear();
 }
 
+const APPROVAL_STATUSES = [
+  "pending_approval",
+  "approved",
+  "rejected",
+  "expired",
+  "executing",
+  "submitted",
+  "confirmed",
+  "failed",
+] as const satisfies readonly ApprovalStatus[];
+
+function parseStatusFilter<T extends string>(
+  raw: string | null,
+  valid: readonly T[]
+): { ok: true; status?: T } | { ok: false; error: string } {
+  if (raw === null) return { ok: true };
+  if ((valid as readonly string[]).includes(raw)) {
+    return { ok: true, status: raw as T };
+  }
+  return {
+    ok: false,
+    error: `invalid status '${raw}'; valid values: ${valid.join(", ")}`,
+  };
+}
+
 export interface ServerOptions {
   port: number;
   horizonUrl: string;
@@ -862,11 +887,12 @@ export async function createApiServer(options: ServerOptions) {
 
   async function handleListApprovals(ctx: RequestContext, req: any, res: any) {
     const urlObj = new URL(req.url ?? "", "http://localhost");
-    const statusFilter = urlObj.searchParams.get("status") ?? undefined;
+    const statusFilter = parseStatusFilter(urlObj.searchParams.get("status"), APPROVAL_STATUSES);
+    if (!statusFilter.ok) return json(res, { error: statusFilter.error }, 400);
     const limit = Math.max(1, Math.min(200, Number(urlObj.searchParams.get("limit") ?? 50) || 50));
     const offset = Math.max(0, Number(urlObj.searchParams.get("offset") ?? 0) || 0);
-    const rows = await approvals.listByOwner(ctx.ownerId!, limit, offset, statusFilter);
-    const total = await approvals.countByOwner(ctx.ownerId!, statusFilter);
+    const rows = await approvals.listByOwner(ctx.ownerId!, limit, offset, statusFilter.status);
+    const total = await approvals.countByOwner(ctx.ownerId!, statusFilter.status);
     // `truncated`: more matching rows exist beyond this page.
     // `hasMore`: the client can actually fetch them (offset ceiling ends pagination).
     const truncated = offset + rows.length < total;
@@ -1010,10 +1036,14 @@ export async function createApiServer(options: ServerOptions) {
     if (!agentId) return json(res, { error: "invalid agent id in path" }, 400);
     const allowed = await authorizationService.canAccessAgent(ctx, agentId);
     if (!allowed) return json(res, { error: "not found" }, 404);
-    const statusFilter = urlObj.searchParams.get("status") ?? undefined;
+    const statusFilter = parseStatusFilter(urlObj.searchParams.get("status"), APPROVAL_STATUSES);
+    if (!statusFilter.ok) return json(res, { error: statusFilter.error }, 400);
     const limit = Math.max(1, Math.min(100, Number(urlObj.searchParams.get("limit") ?? 50) || 50));
     const offset = Math.max(0, Number(urlObj.searchParams.get("offset") ?? 0) || 0);
-    const rows = await approvals.listByAgent(agentId, limit + 1, offset, statusFilter);
+    const rows =
+      statusFilter.status === undefined
+        ? await approvals.listByAgent(agentId, limit + 1, offset)
+        : await approvals.listByStatus(agentId, statusFilter.status, limit + 1, offset);
     const page = rows.slice(0, limit);
     const hasMore = rows.length > limit && !isOffsetAtCeiling(offset);
     return json(res, { agentId, approvals: page, hasMore });
