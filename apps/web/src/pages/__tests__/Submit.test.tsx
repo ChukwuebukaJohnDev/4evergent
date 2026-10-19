@@ -180,5 +180,10 @@ describe('Submit', () => {
       'href',
       '/agents/agent-1/activity/act-123'
     );
+
+    expect(mockSubmitPayment).toHaveBeenCalledWith(
+      'agent-1',
+      expect.objectContaining({ asset: 'USDC' })
+    );
   });
 });
