@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { StellarAdapter } from "../src/stellar-adapter.js";
-import type { NetworkInfo, StellarAccount } from "@4evergent/shared";
 
 // Helper to create a fake Horizon response
 function createFakeFetcher(responseMap: Record<string, { status: number; body?: unknown; shouldThrow?: boolean }>) {
