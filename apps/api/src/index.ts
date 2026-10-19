@@ -755,8 +755,10 @@ export async function createApiServer(options: ServerOptions) {
     const urlObj = new URL(req.url ?? "", "http://localhost");
     const capability = urlObj.searchParams.get("capability");
     const hasLimit = urlObj.searchParams.has("limit");
+    const rawLimit = urlObj.searchParams.get("limit");
+    const parsedLimit = rawLimit !== null && rawLimit.trim() !== "" ? Number(rawLimit) : NaN;
     const limit = hasLimit
-      ? Math.max(1, Math.min(200, Number(urlObj.searchParams.get("limit") ?? 50) || 50))
+      ? Math.max(1, Math.min(200, Number.isNaN(parsedLimit) ? 50 : parsedLimit))
       : undefined;
 
     const all = capability !== null

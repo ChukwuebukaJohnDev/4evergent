@@ -241,7 +241,7 @@ function runApiCapabilityTests(backendName: string, makeStore: () => { store: In
       // Limit clamped to 1 minimum
       const minRes = await get(`${baseUrl}/agents?capability=payment&limit=0`);
       assert.equal(minRes.status, 200);
-      assert.ok(minRes.body.agents.length >= 1);
+      assert.equal(minRes.body.agents.length, 1);
     } finally {
       await server.close();
       cleanup?.();
