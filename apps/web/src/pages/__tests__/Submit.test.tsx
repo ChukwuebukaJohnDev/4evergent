@@ -146,4 +146,17 @@ describe('Submit', () => {
     expect(screen.getByLabelText('Destination (Stellar G...)')).toBeInTheDocument();
     expect(screen.getByLabelText('Reason')).toBeInTheDocument();
   });
+
+  test('selecting Other and entering asset code keeps the value visible', async () => {
+    renderSubmit();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('Asset'), { target: { value: 'other' } });
+    expect(screen.getByPlaceholderText('e.g. USDC')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('e.g. USDC'), { target: { value: 'ETH' } });
+    expect(screen.getByPlaceholderText('e.g. USDC')).toHaveValue('ETH');
+  });
 });

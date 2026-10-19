@@ -16,7 +16,8 @@ export default function Submit() {
   const [intentType, setIntentType] = useState<'payment' | 'trustline'>('payment');
   const [amount, setAmount] = useState('');
   const [destination, setDestination] = useState('');
-  const [assetCode, setAssetCode] = useState('XLM');
+  const [assetCode, setAssetCode] = useState<'XLM' | 'USDC' | 'BTC' | 'other'>('XLM');
+  const [otherAssetCode, setOtherAssetCode] = useState('');
   const [issuer, setIssuer] = useState('');
   const [trustlineAssetCode, setTrustlineAssetCode] = useState('');
   const [trustlineIssuer, setTrustlineIssuer] = useState('');
@@ -47,10 +48,11 @@ export default function Submit() {
       if (!amount || parseFloat(amount) <= 0) { setLoading(false); return setError('Amount must be positive'); }
       if (!destination || !destination.startsWith('G')) { setLoading(false); return setError('Destination must be a valid Stellar account (G...)'); }
       const isNativeXLM = assetCode === 'XLM';
+      const actualAssetCode = assetCode === 'other' ? otherAssetCode : assetCode;
       const intent: SubmitPaymentIntent = {
         type: 'payment',
-        asset: assetCode === 'XLM' ? 'XLM' : assetCode,
-        ...((!isNativeXLM && issuer) ? { assetDetails: { code: assetCode, issuer } } : {}),
+        asset: actualAssetCode === 'XLM' ? 'XLM' : actualAssetCode,
+        ...((!isNativeXLM && issuer) ? { assetDetails: { code: actualAssetCode, issuer } } : {}),
         destination,
         amount,
         reason,
@@ -138,7 +140,7 @@ export default function Submit() {
           <>
             <div className="field">
               <label htmlFor="asset">Asset</label>
-              <select id="asset" value={assetCode} onChange={(e) => setAssetCode(e.target.value)} className="select">
+              <select id="asset" value={assetCode} onChange={(e) => setAssetCode(e.target.value as "XLM" | "USDC" | "BTC" | "other")} className="select">
                 <option value="XLM">XLM (native)</option>
                 <option value="USDC">USDC</option>
                 <option value="BTC">BTC</option>
@@ -148,7 +150,7 @@ export default function Submit() {
             {assetCode === 'other' && (
               <div className="field">
                 <label htmlFor="asset-code">Asset Code</label>
-                <input id="asset-code" type="text" value={assetCode === 'other' ? '' : assetCode} onChange={(e) => setAssetCode(e.target.value)} placeholder="e.g. USDC" className="input" aria-describedby="asset-code-hint" />
+                <input id="asset-code" type="text" value={otherAssetCode || assetCode} onChange={(e) => setOtherAssetCode(e.target.value)} placeholder="e.g. USDC" className="input" aria-describedby="asset-code-hint" />
                 <div id="asset-code-hint" className="field-hint">Enter the asset code, e.g. USDC.</div>
               </div>
             )}
