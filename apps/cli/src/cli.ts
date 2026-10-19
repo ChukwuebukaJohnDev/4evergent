@@ -14,6 +14,8 @@
 
 import { exit } from "node:process";
 import { createRequire } from "node:module";
+import { COMMAND_TREE, AGENT_STATUS_VALUES } from "./commands.js";
+import { generateCompletion } from "./completion.js";
 
 // The build replaces this lookup with the package version for a standalone CLI.
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
@@ -861,6 +863,7 @@ const COMMANDS_HELP = [
   "  activity list <agent-id> [limit] | get <agent-id> <activity-id>",
   "  schedule list <agent-id> [limit] | get <agent-id> <schedule-id> | create <agent-id> <cron> <intent> | update <agent-id> <schedule-id> <cron> | pause <agent-id> <schedule-id> | resume <agent-id> <schedule-id> | disable <agent-id> <schedule-id> | delete <agent-id> <schedule-id>",
   "  intent submit <agent-id> <type> [args...] [--idempotency-key <key>]",
+  "  completion bash | zsh",
 ].join("\n");
 
 async function main(): Promise<number> {
@@ -888,6 +891,14 @@ async function main(): Promise<number> {
         case "pause": return cmdAgentStatus(argv[2] ?? "", "paused");
         case "resume": return cmdAgentStatus(argv[2] ?? "", "active");
         case "disable": return cmdAgentStatus(argv[2] ?? "", "disabled");
+        case "status": {
+          const status = argv[3];
+          if (!status || !AGENT_STATUS_VALUES.includes(status as any)) {
+            console.error(`Usage: 4evergent agent status <id> <${AGENT_STATUS_VALUES.join("|")}>`);
+            return 1;
+          }
+          return cmdAgentStatus(argv[2] ?? "", status as any);
+        }
         default:
           console.error(`Unknown agent subcommand: ${sub}`);
           console.error("Usage: 4evergent agent <list|get|create|pause|resume|disable> [id]");
@@ -951,6 +962,21 @@ async function main(): Promise<number> {
         default:
           console.error("Usage: 4evergent intent submit <agent-id> <type> [args...] [--idempotency-key <key>]");
           console.error("Types: payment | trustline | contract_call");
+          return 1;
+      }
+    case "completion":
+      switch (sub) {
+        case "bash":
+          process.stdout.write(generateCompletion("bash", COMMAND_TREE));
+          return 0;
+        case "zsh":
+          process.stdout.write(generateCompletion("zsh", COMMAND_TREE));
+          return 0;
+        default:
+          if (sub) {
+            console.error(`Unknown completion shell: ${sub}`);
+          }
+          console.error("Usage: 4evergent completion <bash|zsh>");
           return 1;
       }
     case "--help":
