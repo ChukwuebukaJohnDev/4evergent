@@ -147,7 +147,13 @@ describe('Submit', () => {
     expect(screen.getByLabelText('Reason')).toBeInTheDocument();
   });
 
-  test('selecting Other and entering asset code keeps the value visible', async () => {
+  test('selecting Other and entering asset code keeps the value visible and submits correctly', async () => {
+    mockSubmitPayment.mockResolvedValue({
+      activityId: 'act-123',
+      approvalId: 'appr-456',
+      status: 'pending_approval',
+    });
+
     renderSubmit();
 
     await waitFor(() => {
@@ -156,7 +162,23 @@ describe('Submit', () => {
 
     fireEvent.change(screen.getByLabelText('Asset'), { target: { value: 'other' } });
     expect(screen.getByPlaceholderText('e.g. USDC')).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText('e.g. USDC'), { target: { value: 'ETH' } });
-    expect(screen.getByPlaceholderText('e.g. USDC')).toHaveValue('ETH');
+    fireEvent.change(screen.getByPlaceholderText('e.g. USDC'), { target: { value: 'USDC' } });
+    expect(screen.getByPlaceholderText('e.g. USDC')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('e.g. USDC')).toHaveValue('USDC');
+
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Monthly payment' } });
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Destination (Stellar G...)'), { target: { value: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQ' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Intent' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('View activity')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('View activity').closest('a')).toHaveAttribute(
+      'href',
+      '/agents/agent-1/activity/act-123'
+    );
   });
 });
