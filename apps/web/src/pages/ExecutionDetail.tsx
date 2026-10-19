@@ -13,6 +13,7 @@ function statusLabel(status: ExecutionStatus): string {
     case 'confirmed': return 'Confirmed';
     case 'failed': return 'Failed';
     case 'dead_letter': return 'Dead Letter';
+    case 'cancelled': return 'Cancelled';
   }
 }
 
@@ -24,6 +25,7 @@ function statusClass(status: ExecutionStatus): string {
     case 'confirmed': return 'badge-ok';
     case 'failed': return 'badge-err';
     case 'dead_letter': return 'badge-err';
+    case 'cancelled': return 'badge-neutral';
   }
 }
 
@@ -35,6 +37,7 @@ function statusDescription(status: ExecutionStatus): string | null {
     case 'confirmed': return 'Transaction confirmed on-chain.';
     case 'failed': return 'Transaction failed on-chain.';
     case 'dead_letter': return 'Execution failed and will not be retried automatically.';
+    case 'cancelled': return 'Execution was cancelled by operator and will not be retried.';
   }
 }
 

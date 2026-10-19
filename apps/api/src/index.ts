@@ -81,6 +81,31 @@ export function clearAgents() {
   agents.clear();
 }
 
+const APPROVAL_STATUSES = [
+  "pending_approval",
+  "approved",
+  "rejected",
+  "expired",
+  "executing",
+  "submitted",
+  "confirmed",
+  "failed",
+] as const satisfies readonly ApprovalStatus[];
+
+function parseStatusFilter<T extends string>(
+  raw: string | null,
+  valid: readonly T[]
+): { ok: true; status?: T } | { ok: false; error: string } {
+  if (raw === null) return { ok: true };
+  if ((valid as readonly string[]).includes(raw)) {
+    return { ok: true, status: raw as T };
+  }
+  return {
+    ok: false,
+    error: `invalid status '${raw}'; valid values: ${valid.join(", ")}`,
+  };
+}
+
 export interface ServerOptions {
   port: number;
   horizonUrl: string;
@@ -282,7 +307,10 @@ export async function createApiServer(options: ServerOptions) {
       };
     };
 
-    const pipelineExecutor = async (record: ExecutionRecord) => {
+    const pipelineExecutor = async (
+      record: ExecutionRecord,
+      context?: import("./execution-queue.js").ExecutionContext
+    ) => {
       // Phase 25: Wrap sequence-sensitive execution in account-scoped lock.
       //
       // WHY: Two concurrent executions using the SAME Stellar source account
@@ -300,14 +328,31 @@ export async function createApiServer(options: ServerOptions) {
       // two executions read the same sequence before either acquires the lock.
       const accountId = options.signer.getAccountId();
       return sequenceCoordinator.runExclusive(accountId, async () => {
+        if (context?.signal?.aborted) {
+          const err = new Error("Execution was cancelled");
+          err.name = "AbortError";
+          throw err;
+        }
         try {
           const sourceAccount = await getSourceAccount();
+          if (context?.signal?.aborted) {
+            const err = new Error("Execution was cancelled");
+            err.name = "AbortError";
+            throw err;
+          }
           const outcome = await pipeline.execute({
             intent: record.intent,
             sourceAccount,
             activityId: record.activityId ?? undefined,
+            signal: context?.signal,
+            onBeforeSubmit: () => {
+              context?.onBeforeSubmit?.();
+            },
           });
           const txHash = (outcome as { txHash?: string }).txHash;
+          if (txHash) {
+            context?.onSubmitted?.(txHash);
+          }
           return {
             record,
             success: outcome.status === "submitted",
@@ -319,6 +364,20 @@ export async function createApiServer(options: ServerOptions) {
             activityId: (outcome as { activityId?: string }).activityId ?? record.activityId ?? undefined,
           };
         } catch (err: unknown) {
+          if (context?.signal?.aborted) {
+            if (record.activityId && options.activityStore) {
+              try {
+                await options.activityStore.update(record.activityId, {
+                  status: "failed",
+                  error: "cancelled by user",
+                  updatedAt: new Date().toISOString(),
+                });
+              } catch {
+                // ActivityStore update failure is non-critical
+              }
+            }
+            throw err;
+          }
           // Pipeline failed before persisting activity (e.g., source account load failure).
           // Update the pre-created ActivityRecord to reflect the failure so the
           // activity record is not left in "pending" indefinitely.
@@ -829,11 +888,12 @@ export async function createApiServer(options: ServerOptions) {
 
   async function handleListApprovals(ctx: RequestContext, req: any, res: any) {
     const urlObj = new URL(req.url ?? "", "http://localhost");
-    const statusFilter = urlObj.searchParams.get("status") ?? undefined;
+    const statusFilter = parseStatusFilter(urlObj.searchParams.get("status"), APPROVAL_STATUSES);
+    if (!statusFilter.ok) return apiError(res, "VALIDATION_ERROR", { message: statusFilter.error });
     const limit = Math.max(1, Math.min(200, Number(urlObj.searchParams.get("limit") ?? 50) || 50));
     const offset = Math.max(0, Number(urlObj.searchParams.get("offset") ?? 0) || 0);
-    const rows = await approvals.listByOwner(ctx.ownerId!, limit, offset, statusFilter);
-    const total = await approvals.countByOwner(ctx.ownerId!, statusFilter);
+    const rows = await approvals.listByOwner(ctx.ownerId!, limit, offset, statusFilter.status);
+    const total = await approvals.countByOwner(ctx.ownerId!, statusFilter.status);
     // `truncated`: more matching rows exist beyond this page.
     // `hasMore`: the client can actually fetch them (offset ceiling ends pagination).
     const truncated = offset + rows.length < total;
@@ -977,10 +1037,14 @@ export async function createApiServer(options: ServerOptions) {
     if (!agentId) return apiError(res, "INVALID_PATH_PARAM");
     const allowed = await authorizationService.canAccessAgent(ctx, agentId);
     if (!allowed) return apiError(res, "AGENT_NOT_FOUND");
-    const statusFilter = urlObj.searchParams.get("status") ?? undefined;
+    const statusFilter = parseStatusFilter(urlObj.searchParams.get("status"), APPROVAL_STATUSES);
+    if (!statusFilter.ok) return apiError(res, "VALIDATION_ERROR", { message: statusFilter.error });
     const limit = Math.max(1, Math.min(100, Number(urlObj.searchParams.get("limit") ?? 50) || 50));
     const offset = Math.max(0, Number(urlObj.searchParams.get("offset") ?? 0) || 0);
-    const rows = await approvals.listByAgent(agentId, limit + 1, offset, statusFilter);
+    const rows =
+      statusFilter.status === undefined
+        ? await approvals.listByAgent(agentId, limit + 1, offset)
+        : await approvals.listByStatus(agentId, statusFilter.status, limit + 1, offset);
     const page = rows.slice(0, limit);
     const hasMore = rows.length > limit && !isOffsetAtCeiling(offset);
     return json(res, { agentId, approvals: page, hasMore });
@@ -1291,7 +1355,19 @@ export async function createApiServer(options: ServerOptions) {
 
     const result = await executionQueue.cancel(executionId);
     if (result.status === "not_found") return apiError(res, "EXECUTION_NOT_FOUND");
-    if (result.status === "invalid_state") return apiError(res, "INVALID_EXECUTION_STATE", { message: `cannot cancel execution in status '${execution.status}'` });
+    if (result.status === "invalid_state") {
+      const current = await executionStore.get(executionId);
+      const currentStatus = current?.status ?? execution.status;
+      let msg: string;
+      if (currentStatus !== "executing") {
+        msg = `cannot cancel execution in status '${currentStatus}'`;
+      } else if (result.reason === "not_in_flight") {
+        msg = "cannot cancel execution: execution is not actively running on this worker";
+      } else {
+        msg = "cannot cancel execution: pipeline has already begun submitting transaction";
+      }
+      return apiError(res, "INVALID_EXECUTION_STATE", { message: msg });
+    }
     if (result.status === "conflict") return apiError(res, "EXECUTION_CONFLICT");
 
     return json(res, { execution: result.execution, message: "execution cancelled" });
