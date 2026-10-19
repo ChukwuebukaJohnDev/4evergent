@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "feat/issue-110-add-an-integration-test-for-the-reconciler-and",
+    "feat/issue-117-rewrite-agent-registry-design-md-for-the",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "feat/issue-110-add-an-integration-test-for-the-reconciler-and": "main",
+    "feat/issue-117-rewrite-agent-registry-design-md-for-the": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "feat/issue-110-add-an-integration-test-for-the-reconciler-and",
+    "feat/issue-117-rewrite-agent-registry-design-md-for-the",
+    "origin"
+  ]
+}
