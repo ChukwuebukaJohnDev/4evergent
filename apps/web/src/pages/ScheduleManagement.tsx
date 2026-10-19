@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react';
+import { useId } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { Skeleton } from '../components';
 import type { ScheduleRecord, SubmitPaymentIntent } from '../types';
@@ -99,6 +100,7 @@ export function ScheduleManagement({ agentId, onError }: ScheduleManagementProps
       setEditSaving(false);
     }
   };
+
   if (error && schedules === null) return <div className="error" role="alert">{error}</div>;
 
   return (
@@ -166,6 +168,9 @@ export function ScheduleManagement({ agentId, onError }: ScheduleManagementProps
                           aria-describedby="schedule-edit-cron-help"
                         />
                       </label>
+                      <small id="schedule-edit-cron-help">
+                        5-field cron expression: minute (0-59), hour (0-23), day-of-month (1-31), month (1-12), day-of-week (0-6, 0=Sunday)
+                      </small>
                       <div className="cron-presets">
                         <span className="muted">Presets:</span>
                         {CRON_PRESETS.map((preset) => (
@@ -180,9 +185,6 @@ export function ScheduleManagement({ agentId, onError }: ScheduleManagementProps
                           </button>
                         ))}
                       </div>
-                      <small id="schedule-edit-cron-help" className="muted">
-                        5-field cron expression: minute (0-59), hour (0-23), day-of-month (1-31), month (1-12), day-of-week (0-6, 0=Sunday)
-                      </small>
                       {editError && <div className="error" role="alert">{editError}</div>}
                       <div className="form-actions">
                         <button
@@ -330,7 +332,7 @@ function CreateScheduleForm({ agentId, onSuccess, onError }: {
             onChange={(e) => setDestination(e.target.value)}
             placeholder="G..."
             required
-            aria-label="Destination"
+            aria-label="Destination (G...)"
           />
         </label>
         <label>
@@ -340,23 +342,43 @@ function CreateScheduleForm({ agentId, onSuccess, onError }: {
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Payment reason"
+            placeholder="Recurring payment"
+            minLength={3}
+            required
             aria-label="Reason"
           />
         </label>
-        <label>
-          <span>Schedule expression</span>
-          <input
-            id="schedule-expression"
-            type="text"
-            value={scheduleExpression}
-            onChange={(e) => setScheduleExpression(e.target.value)}
-            placeholder="0 0 * * * (minute hour...)"
-            required
-            aria-label="Schedule expression"
-            aria-describedby={cronHelpId}
-          />
-        </label>
+      </div>
+
+      <label className="full-width">
+        <span>Schedule (cron expression)</span>
+        <input
+          id="schedule-expression"
+          type="text"
+          value={scheduleExpression}
+          onChange={(e) => setScheduleExpression(e.target.value)}
+          placeholder="0 0 * * * (minute hour day-of-month month day-of-week)"
+          required
+          aria-describedby={cronHelpId}
+        />
+        <small id={cronHelpId}>5-field cron expression: minute (0-59), hour (0-23), day-of-month (1-31), month (1-12), day-of-week (0-6, 0=Sunday)</small>
+      </label>
+
+      <div className="cron-presets">
+        <span className="muted">Presets:</span>
+        {CRON_PRESETS.map((preset) => (
+          <button
+            key={preset.expression}
+            type="button"
+            className="preset-btn"
+            onClick={() => setScheduleExpression(preset.expression)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="form-grid">
         <label>
           <span>Timezone</span>
           <select id="schedule-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} aria-label="Timezone">
@@ -367,11 +389,8 @@ function CreateScheduleForm({ agentId, onSuccess, onError }: {
         </label>
       </div>
 
-      <small id={cronHelpId} className="muted">
-        5-field cron expression: minute (0-59), hour (0-23), day-of-month (1-31), month (1-12), day-of-week (0-6, 0=Sunday)
-      </small>
-
       <div className="form-actions">
+        <button type="button" onClick={onSuccess} disabled={saving}>Cancel</button>
         <button type="submit" disabled={saving}>
           {saving ? 'Creating...' : 'Create Schedule'}
         </button>
@@ -380,6 +399,9 @@ function CreateScheduleForm({ agentId, onSuccess, onError }: {
   );
 }
 
-function ScheduleStatusBadge({ status }: { status: ScheduleRecord['status'] }) {
-  return <span className={`status-badge status-${status}`}>{status}</span>;
+function ScheduleStatusBadge({ status }: { status: string }) {
+  const cls = status === 'active' ? 'badge-ok'
+    : status === 'paused' ? 'badge-warn'
+    : 'badge-err';
+  return <span className={'badge ' + cls}>{status}</span>;
 }

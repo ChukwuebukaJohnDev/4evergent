@@ -46,8 +46,8 @@ export default function Agents() {
       if (e.key !== 'Tab') return;
       const items = focusable();
       if (items.length === 0) return;
-      const firstEl = items[0];
-      const lastEl = items[items.length - 1];
+      const firstEl = items[0]!;
+      const lastEl = items[items.length - 1]!;
       if (e.shiftKey && document.activeElement === firstEl) {
         e.preventDefault();
         lastEl.focus();
@@ -81,7 +81,7 @@ export default function Agents() {
     }
   };
 
-  if (error) return <EmptyState title="Failed to load agents" message={error} />;
+  if (error) return <EmptyState title="Failed to load agents" message={error} error={true} />;
   if (agents === null) return <Skeleton label="Loading agents..." />;
 
   return (

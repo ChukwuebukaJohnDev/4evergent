@@ -3,6 +3,7 @@
  * Reusable building blocks to reduce duplication across pages.
  */
 
+import * as React from 'react';
 import type { ActivityRecord, ExecutionRecord, ApprovalRecord, AgentRecord } from '../types';
 
 /* ==========================================================================
@@ -94,9 +95,9 @@ export function Skeleton({ label }: { label: string }) {
    EmptyState
    ========================================================================== */
 
-export function EmptyState({ title, message }: { title: string; message: string }) {
+export function EmptyState({ title, message, error }: { title: string; message: string; error?: boolean }) {
   return (
-    <div className="empty-state">
+    <div className="empty-state" {...(error ? { role: 'alert' } : {})}>
       <h3>{title}</h3>
       <p>{message}</p>
     </div>
@@ -425,8 +426,8 @@ export function Modal({
       if (e.key !== 'Tab') return;
       const items = focusable();
       if (items.length === 0) return;
-      const firstEl = items[0];
-      const lastEl = items[items.length - 1];
+      const firstEl = items[0]!;
+      const lastEl = items[items.length - 1]!;
       if (e.shiftKey && document.activeElement === firstEl) {
         e.preventDefault();
         lastEl.focus();

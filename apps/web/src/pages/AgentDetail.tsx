@@ -205,9 +205,6 @@ function PolicySettings({ agentId }: { agentId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [form, setForm] = useState<PolicyRules | null>(null);
-  const [assetInput, setAssetInput] = useState('');
-  const [destInput, setDestInput] = useState('');
-  const [contractInput, setContractInput] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -305,6 +302,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           <label>
             <span>Max Transaction Amount (XLM)</span>
             <input
+              id="policy-max-tx-xlm"
               type="number"
               step="0.0000001"
               min="0"
@@ -317,6 +315,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           <label>
             <span>Daily Spending Limit (XLM)</span>
             <input
+              id="policy-daily-limit-xlm"
               type="number"
               step="0.0000001"
               min="0"
@@ -329,6 +328,7 @@ function PolicySettings({ agentId }: { agentId: string }) {
           <label>
             <span>Approval Threshold (XLM)</span>
             <input
+              id="policy-approval-threshold"
               type="number"
               step="0.0000001"
               min="0"
@@ -338,125 +338,253 @@ function PolicySettings({ agentId }: { agentId: string }) {
             />
             <small>Intents above this amount require human approval before execution.</small>
           </label>
+          <label>
+            <span>Require Human Approval Above (XLM)</span>
+            <input
+              id="policy-require-human-approval-above"
+              type="number"
+              step="0.0000001"
+              min="0"
+              value={form.requireHumanApprovalForAmountAbove}
+              onChange={(e) => updateForm({ requireHumanApprovalForAmountAbove: e.target.value })}
+              placeholder="50"
+            />
+            <small>Amount above which human approval is required. Should match approval threshold.</small>
+          </label>
         </div>
       </div>
 
       <div className="policy-section">
         <h3>Allowed Assets</h3>
-        <ul className="policy-list">
+        <div className="chip-list">
           {form.allowedAssets.map((asset) => (
-            <li key={asset}>
-              <span>{asset}</span>
-              <button
-                type="button"
-                aria-label={`Remove allowed asset ${asset}`}
-                onClick={() => removeListItem('allowedAssets', asset)}
-              >
-                Remove
-              </button>
-            </li>
+            <span key={asset} className="chip">
+              {asset}
+              <button type="button" className="chip-remove" aria-label={`Remove allowed asset ${asset}`} onClick={() => removeListItem('allowedAssets', asset)}>×</button>
+            </span>
           ))}
-        </ul>
-        <label>
-          <span>Add allowed asset</span>
+        </div>
+        <div className="inline-input">
           <input
             type="text"
-            value={assetInput}
-            onChange={(e) => setAssetInput(e.target.value)}
-            placeholder="e.g. USDC"
+            aria-label="Add allowed asset"
+            placeholder="Add asset (e.g. USDC)"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addListItem('allowedAssets', (e.target as HTMLInputElement).value);
+                (e.target as HTMLInputElement).value = '';
+              }
+            }}
           />
-        </label>
-        <button
-          type="button"
-          aria-label="Add allowed asset"
-          onClick={() => {
-            addListItem('allowedAssets', assetInput);
-            setAssetInput('');
-          }}
-        >
-          Add asset
-        </button>
+        </div>
+        <small>Assets the agent is allowed to transact with.</small>
       </div>
 
       <div className="policy-section">
         <h3>Allowed Destinations</h3>
-        <ul className="policy-list">
+        <div className="chip-list">
+          {form.allowedDestinations.length === 0 && <span className="muted">No restrictions (any destination allowed)</span>}
           {form.allowedDestinations.map((dest) => (
-            <li key={dest}>
-              <span>{dest}</span>
-              <button
-                type="button"
-                aria-label={`Remove allowed destination ${dest}`}
-                onClick={() => removeListItem('allowedDestinations', dest)}
-              >
-                Remove
-              </button>
-            </li>
+            <span key={dest} className="chip">
+              {dest}
+              <button type="button" className="chip-remove" aria-label={`Remove allowed destination ${dest}`} onClick={() => removeListItem('allowedDestinations', dest)}>×</button>
+            </span>
           ))}
-        </ul>
-        <label>
-          <span>Add allowed destination</span>
+        </div>
+        <div className="inline-input">
           <input
             type="text"
-            value={destInput}
-            onChange={(e) => setDestInput(e.target.value)}
-            placeholder="G..."
+            aria-label="Add allowed destination"
+            placeholder="Add destination (G...)"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addListItem('allowedDestinations', (e.target as HTMLInputElement).value);
+                (e.target as HTMLInputElement).value = '';
+              }
+            }}
           />
-        </label>
-        <button
-          type="button"
-          aria-label="Add allowed destination"
-          onClick={() => {
-            addListItem('allowedDestinations', destInput);
-            setDestInput('');
-          }}
-        >
-          Add destination
-        </button>
+        </div>
+        <small>Optional whitelist of allowed destination addresses. Empty means any destination is allowed.</small>
       </div>
 
       <div className="policy-section">
-        <h3>Allowed Contract IDs</h3>
-        <ul className="policy-list">
-          {form.allowedContractIds.map((cid) => (
-            <li key={cid}>
-              <span>{cid}</span>
-              <button
-                type="button"
-                aria-label={`Remove allowed contract ${cid}`}
-                onClick={() => removeListItem('allowedContractIds', cid)}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-        <label>
-          <span>Add allowed contract ID</span>
-          <input
-            type="text"
-            value={contractInput}
-            onChange={(e) => setContractInput(e.target.value)}
-            placeholder="C..."
-          />
-        </label>
-        <button
-          type="button"
-          aria-label="Add allowed contract ID"
-          onClick={() => {
-            addListItem('allowedContractIds', contractInput);
-            setContractInput('');
-          }}
-        >
-          Add contract
-        </button>
+        <h3>Allowed Operations</h3>
+        <div className="checkbox-grid">
+          <label className="checkbox-label">
+            <input
+              id="policy-op-payment"
+              type="checkbox"
+              checked={form.txTypeRestrictions.payment ?? false}
+              onChange={(e) => updateForm({ txTypeRestrictions: { ...form.txTypeRestrictions, payment: e.target.checked } })}
+            />
+            <span>Payment</span>
+          </label>
+          <label className="checkbox-label">
+            <input
+              id="policy-op-trustline"
+              type="checkbox"
+              checked={form.txTypeRestrictions.trustline ?? false}
+              onChange={(e) => updateForm({ txTypeRestrictions: { ...form.txTypeRestrictions, trustline: e.target.checked } })}
+            />
+            <span>Trustline</span>
+          </label>
+          <label className="checkbox-label">
+            <input
+              id="policy-op-contract-call"
+              type="checkbox"
+              checked={form.txTypeRestrictions.contract_call ?? false}
+              onChange={(e) => updateForm({ txTypeRestrictions: { ...form.txTypeRestrictions, contract_call: e.target.checked } })}
+            />
+            <span>Contract Call</span>
+          </label>
+          <label className="checkbox-label">
+            <input
+              id="policy-op-account-settings"
+              type="checkbox"
+              checked={form.txTypeRestrictions.account_settings ?? false}
+              onChange={(e) => updateForm({ txTypeRestrictions: { ...form.txTypeRestrictions, account_settings: e.target.checked } })}
+            />
+            <span>Account Settings</span>
+          </label>
+        </div>
       </div>
 
-      <div className="policy-actions">
+      <div className="policy-meta">
+        {version !== null && <span className="muted">Version: {version}</span>}
+        {updatedAt && <span className="muted">Last updated: {new Date(updatedAt).toLocaleString()}</span>}
+      </div>
+
+      <div className="form-actions">
         <button type="submit" disabled={saving || !isDirty}>
-          {saving ? 'Saving...' : 'Save policy'}
+          {saving ? 'Saving...' : 'Save Policy'}
         </button>
+        {!isDirty && <span className="muted">No changes</span>}
       </div>
     </form>
+  );
+}
+
+export default function AgentDetail() {
+  const agentId = useParams<{ agentId: string }>().agentId ?? '';
+  const [agent, setAgent] = useState<AgentRecord | null>(null);
+  const [activity, setActivity] = useState<ActivityRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [spending, setSpending] = useState<SpendingData | null>(null);
+  const [spendingError, setSpendingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.getAgentSpending(agentId);
+        setSpending(res.spending);
+      } catch (e: any) {
+        setSpendingError(e.message ?? 'Failed to load spending');
+      }
+    })();
+  }, [agentId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [a, act] = await Promise.all([
+          api.getAgent(agentId),
+          api.agentActivity(agentId, 20),
+        ]);
+        setAgent(a);
+        setActivity(act.activity);
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [agentId]);
+
+  if (loading) {
+    return <Skeleton label="Loading agent..." />;
+  }
+  if (error) {
+    return <EmptyState title="Failed to load agent" message={error} error={true} />;
+  }
+  if (!agent) {
+    return (
+      <div className="empty-state">
+        <h2>Agent not found</h2>
+        <p>This agent does not exist or you do not have access.</p>
+      </div>
+    );
+  }
+
+  const handleStatusChange = (newStatus: string) => {
+    setAgent((prev) => prev ? { ...prev, status: newStatus as typeof prev.status } : prev);
+  };
+
+  return (
+    <section>
+      <AgentHeader agent={agent} onStatusChange={handleStatusChange} />
+      <div className="block">
+        <h2>Financial Control</h2>
+        {spending === null && spendingError === null ? (
+          <Skeleton label="Loading spending..." />
+        ) : spendingError ? (
+          <div className="error" role="alert">{spendingError}</div>
+        ) : spending && Object.keys(spending).length > 0 ? (
+          <div className="spending-overview">
+            {Object.entries(spending).map(([asset, data]) => (
+              <SpendingCard key={asset} asset={asset} data={data} />
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state"><p>No daily spending limits configured.</p></div>
+        )}
+      </div>
+      <div className="block">
+        <h2>Recent Activity</h2>
+        {activity === null ? (
+          <Skeleton label="Loading activity..." />
+        ) : activity.length === 0 ? (
+          <div className="empty-state">
+            <p>This agent has no activity yet.</p>
+          </div>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Type</th><th>Amount</th><th>Status</th><th>Time</th></tr>
+            </thead>
+            <tbody>
+              {activity.map((r) => (
+                <tr key={r.id}>
+                  <td><code>{r.id.slice(0, 8)}</code></td>
+                  <td>{r.intent.type}</td>
+                  <td>{r.intent.amount || '-'} {r.intent.asset || ''}</td>
+                  <td><StatusBadge status={r.status} /></td>
+                  <td>{new Date(r.createdAt).toLocaleTimeString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      <div className="block">
+        <h2>Schedules</h2>
+        {scheduleError && <div className="error" role="alert">{scheduleError}</div>}
+        <ScheduleManagement agentId={agentId} onError={setScheduleError} />
+      </div>
+      <div className="block">
+        <h2>Executions</h2>
+        <ExecutionList agentId={agentId} />
+      </div>
+      <div className="block">
+        <h2>Policy</h2>
+        <PolicySummary agentId={agentId} />
+        <div className="policy-edit-section">
+          <PolicySettings agentId={agentId} />
+        </div>
+      </div>
+    </section>
   );
 }

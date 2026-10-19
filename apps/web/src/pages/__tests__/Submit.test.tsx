@@ -29,13 +29,13 @@ function renderSubmit() {
 describe('Submit', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockListAgents.mockResolved({
+    mockListAgents.mockResolvedValue({
       agents: [{ id: 'agent-1', displayName: 'Test Agent' }],
     });
   });
 
   test('shows View activity link after successful payment submit', async () => {
-    mockSubmitPayment.mockResolved({
+    mockSubmitPayment.mockResolvedValue({
       activityId: 'act-123',
       approvalId: 'appr-456',
       status: 'pending_approval',
@@ -44,7 +44,7 @@ describe('Submit', () => {
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInDocument();
+      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
@@ -63,7 +63,7 @@ describe('Submit', () => {
   });
 
   test('shows View activity link after successful trustline submit', async () => {
-    mockSubmitTrustline.mockResolved({
+    mockSubmitTrustline.mockResolvedValue({
       activityId: 'act-789',
       status: 'pending',
     });
@@ -71,7 +71,7 @@ describe('Submit', () => {
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInDocument();
+      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByLabelText('Intent Type'), { target: { value: 'trustline' } });
@@ -91,7 +91,7 @@ describe('Submit', () => {
   });
 
   test('does not show View activity link when activityId is missing', async () => {
-    mockSubmitPayment.mockResolved({
+    mockSubmitPayment.mockResolvedValue({
       activityId: '',
       status: 'pending',
     });
@@ -99,7 +99,7 @@ describe('Submit', () => {
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInDocument();
+      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
@@ -111,16 +111,16 @@ describe('Submit', () => {
       expect(screen.getByText(/Intent submitted/)).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('View activity')).not.toBeInDocument();
+    expect(screen.queryByText('View activity')).not.toBeInTheDocument();
   });
 
   test('renders error banner with role="alert" when submit fails', async () => {
-    mockSubmitPayment.mockRejected(new Error('Insufficient funds'));
+    mockSubmitPayment.mockRejectedValue(new Error('Insufficient funds'));
 
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInDocument();
+      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '10' } });
@@ -137,13 +137,13 @@ describe('Submit', () => {
     renderSubmit();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent')).toBeInDocument();
+      expect(screen.getByLabelText('Agent')).toBeInTheDocument();
     });
 
-    expect(screen.getByLabelText('Intent Type')).toBeInDocument();
+    expect(screen.getByLabelText('Intent Type')).toBeInTheDocument();
     expect(screen.getByLabelText('Asset')).toBeInTheDocument();
-    expect(screen.getByLabelText('Amount')).toBeInDocument();
+    expect(screen.getByLabelText('Amount')).toBeInTheDocument();
     expect(screen.getByLabelText('Destination (Stellar G...)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Reason')).toBeInDocument();
+    expect(screen.getByLabelText('Reason')).toBeInTheDocument();
   });
 });
