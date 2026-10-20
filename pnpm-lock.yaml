@@ -135,6 +135,18 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/client:
+    devDependencies:
+      '@4evergent/shared':
+        specifier: workspace:*
+        version: link:../shared
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.13
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
   packages/database:
     dependencies:
       '@4evergent/shared':

@@ -602,6 +602,57 @@ Response `200`:
 
 ---
 
+## Typed TypeScript client
+
+The private workspace package [`@4evergent/client`](../packages/client/README.md)
+provides a typed, dependency-free client for these routes. It uses Node.js 22+
+built-in `fetch`, accepts a base URL and optional bearer token, and throws
+`ApiError` with the HTTP status and parsed API error body for non-2xx responses.
+Authentication and `/auth/*` flows remain the caller's responsibility.
+
+The client follows the documented API surface with these method names:
+
+| Documented route | Client method |
+|---|---|
+| `GET /health` | `health` |
+| `POST /agents` | `createAgent` |
+| `GET /agents` | `listAgents` |
+| `GET /agents/:id` | `getAgent` |
+| `PATCH /agents/:id/status` | `updateAgentStatus` |
+| `POST /agents/:id/intents` | `submitIntent` |
+| `GET /approvals` | `listApprovals` |
+| `GET /approvals/:id` | `getApproval` |
+| `GET /agents/:id/approvals` | `listAgentApprovals` |
+| `POST /approvals/:id/approve` | `approve` |
+| `POST /approvals/:id/reject` | `reject` |
+| `GET /agents/:id/activity` | `listAgentActivity` |
+| `GET /agents/:id/activity/:activityId` | `getAgentActivity` |
+| `GET /activity` | `listActivity` |
+| `GET /agents/:id/policy` | `getPolicy` |
+| `PUT /agents/:id/policy` | `updatePolicy` |
+| `POST /agents/:id/schedules` | `createSchedule` |
+| `GET /agents/:id/schedules` | `listSchedules` |
+| `GET /agents/:id/schedules/:scheduleId` | `getSchedule` |
+| `PATCH /agents/:id/schedules/:scheduleId` | `updateSchedule` |
+| `DELETE /agents/:id/schedules/:scheduleId` | `deleteSchedule` |
+| `POST /agents/:id/schedules/:scheduleId/pause` | `pauseSchedule` |
+| `POST /agents/:id/schedules/:scheduleId/resume` | `resumeSchedule` |
+| `POST /agents/:id/schedules/:scheduleId/disable` | `disableSchedule` |
+| `GET /agents/:id/executions` | `listAgentExecutions` |
+| `GET /executions` | `listExecutions` |
+| `GET /executions/:id` | `getExecution` |
+| `POST /executions/:id/retry` | `retryExecution` |
+| `POST /executions/:id/cancel` | `cancelExecution` |
+| `GET /agent-queue` | `queueStatus` |
+| `GET /agents/:id/spending` | `getAgentSpending` |
+| `GET /overview/attention` | `overviewAttention` |
+
+Schedule pause, resume, and disable are separate methods because they are
+separate documented action paths. Shared domain types such as `Agent`,
+`AgentIntent`, `ActivityRecord`, and `PolicyRules` come from
+`@4evergent/shared`; record and response types absent from shared are declared
+in the client package.
+
 ## Notes
 
 - Response shapes above are the primary success shapes; record fields
