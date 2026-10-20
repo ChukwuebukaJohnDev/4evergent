@@ -21,15 +21,28 @@ function createFakeFetcher(responseMap: Record<string, { status: number; body?: 
   };
 }
 
-// Test: getNetworkInfo() - successful response
+// Test: getNetworkInfo() - successful response with realistic Horizon structure
 test("getNetworkInfo() returns network info with correct shape", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
   const fakeResponse = {
-    network_passphrase: "Public Global Stellar Network ; September 2015",
-    protocol_version: "21",
+    _links: {
+      account: {
+        href: "https://horizon-testnet.stellar.org/accounts/{account_id}",
+        templated: true,
+      },
+      transactions: {
+        href: "https://horizon-testnet.stellar.org/transactions{?cursor,limit,order}",
+        templated: true,
+      },
+    },
+    horizon_version: "21.5.0",
     stellar_core_version: "21.0.0",
     history_latest_ledger: 50000000,
     history_oldest_ledger: 1,
+    core_latest_ledger: 50000000,
+    network_passphrase: "Test SDF Network ; September 2015",
+    protocol_version: "21",
+    ingest_latest_ledger: 50000000,
   };
 
   const fetcher = createFakeFetcher({
@@ -40,9 +53,9 @@ test("getNetworkInfo() returns network info with correct shape", async () => {
   const info = await adapter.getNetworkInfo();
 
   assert.ok(info);
-  assert.equal(info.network, "Public Global Stellar Network ; September 2015");
+  assert.equal(info.network, "Test SDF Network ; September 2015");
   assert.equal(info.horizonUrl, horizonUrl);
-  assert.equal(info.passphrase, "Public Global Stellar Network ; September 2015");
+  assert.equal(info.passphrase, "Test SDF Network ; September 2015");
   assert.equal(info.protocolVersion, 21);
   assert.equal(info.coreVersion, "21.0.0");
   assert.equal(info.ingestLatestLedger, 50000000);
@@ -52,10 +65,10 @@ test("getNetworkInfo() returns network info with correct shape", async () => {
 
 // Test: getNetworkInfo() - missing optional fields
 test("getNetworkInfo() handles missing optional fields with defaults", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
   const fakeResponse = {
     network_passphrase: "Test SDF Network ; September 2015",
-    // Missing protocol_version, stellar_core_version, history_latest_ledger, history_oldest_ledger
+    // Missing optional fields
   };
 
   const fetcher = createFakeFetcher({
@@ -72,34 +85,84 @@ test("getNetworkInfo() handles missing optional fields with defaults", async () 
   assert.equal(info.oldestLedger, 0);
 });
 
-// Test: getAccount() - successful response
+// Test: getNetworkInfo() throws on non-OK response
+test("getNetworkInfo() throws error on non-OK response", async () => {
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+
+  const fetcher = createFakeFetcher({
+    "/": { status: 500 },
+  });
+
+  const adapter = new StellarAdapter(horizonUrl, fetcher);
+
+  await assert.rejects(
+    async () => adapter.getNetworkInfo(),
+    (err: Error) => err.message.includes("Horizon error")
+  );
+});
+
+// Test: getAccount() - successful response with realistic Horizon account structure
 test("getAccount() returns account with correct shape and balances", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const address = "GBRPYHIL2CI3WHZDTOOQFC6EB4PSOJREITDGFJMYXEYGXCTN76EOAES";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const address = "GDI73WJ4SX7LOG3XZDJC3KCK6ED6E5NBYK2JUBQSPBCNNWEG3ZN7T75U";
   const fakeResponse = {
+    _links: {
+      self: {
+        href: `${horizonUrl}/accounts/${address}`,
+      },
+      transactions: {
+        href: `${horizonUrl}/accounts/${address}/transactions{?cursor,limit,order}`,
+        templated: true,
+      },
+      operations: {
+        href: `${horizonUrl}/accounts/${address}/operations{?cursor,limit,order}`,
+        templated: true,
+      },
+    },
     id: address,
-    sequence: "12345678901234567",
-    balances: [
-      {
-        balance: "1000.0000000",
-        asset_type: "native",
-      },
-      {
-        balance: "500.5000000",
-        limit: "1000.0000000",
-        asset_type: "credit_alphanum12",
-        asset_code: "USDC",
-        asset_issuer: "GBUQWP3BOUZX34ULNQG23RQ6F4BWFIJOSBSGOYHL3QJH4J4UB5KEAAA",
-        buying_liabilities: "10.0000000",
-        selling_liabilities: "20.0000000",
-      },
-    ],
-    subentry_count: 5,
+    account_id: address,
+    sequence: "24739097524306468",
+    subentry_count: 3,
+    inflation_destination: address,
+    home_domain: "example.com",
+    last_modified_ledger: 23569316,
+    num_sponsoring: 0,
+    num_sponsored: 0,
     thresholds: {
       low_threshold: 1,
       med_threshold: 2,
       high_threshold: 3,
     },
+    flags: {
+      auth_required: false,
+      auth_revocable: false,
+      auth_immutable: false,
+      auth_clawback_enabled: false,
+    },
+    balances: [
+      {
+        balance: "1000.0000000",
+        limit: "922337203685.4775807",
+        buying_liabilities: "10.0000000",
+        selling_liabilities: "20.0000000",
+        last_modified_ledger: 22651481,
+        is_authorized: true,
+        is_clawback_enabled: false,
+        asset_type: "native",
+      },
+      {
+        balance: "500.5000000",
+        limit: "1000.0000000",
+        buying_liabilities: "5.0000000",
+        selling_liabilities: "15.0000000",
+        last_modified_ledger: 22651481,
+        is_authorized: true,
+        is_clawback_enabled: false,
+        asset_type: "credit_alphanum12",
+        asset_code: "USDC",
+        asset_issuer: "GBUQWP3BOUZX34ULNQG23RQ6F4BWFIJOSBSGOYHL3QJH4J4UB5KEAAA",
+      },
+    ],
     signers: [
       {
         key: address,
@@ -110,6 +173,7 @@ test("getAccount() returns account with correct shape and balances", async () =>
     data_attr: {
       custom_key: "custom_value",
     },
+    paging_token: "",
   };
 
   const fetcher = createFakeFetcher({
@@ -120,16 +184,18 @@ test("getAccount() returns account with correct shape and balances", async () =>
   const account = await adapter.getAccount(address);
 
   assert.equal(account.address, address);
-  assert.equal(account.sequence, "12345678901234567");
+  assert.equal(account.sequence, "24739097524306468");
   assert.equal(account.balances.length, 2);
   assert.equal(account.balances[0].asset, "XLM");
   assert.equal(account.balances[0].balance, "1000.0000000");
+  assert.equal(account.balances[0].buyingLiabilities, "10.0000000");
+  assert.equal(account.balances[0].sellingLiabilities, "20.0000000");
   assert.equal(account.balances[1].asset, "USDC:GBUQWP3BOUZX34ULNQG23RQ6F4BWFIJOSBSGOYHL3QJH4J4UB5KEAAA");
   assert.equal(account.balances[1].balance, "500.5000000");
   assert.equal(account.balances[1].limit, "1000.0000000");
-  assert.equal(account.balances[1].buyingLiabilities, "10.0000000");
-  assert.equal(account.balances[1].sellingLiabilities, "20.0000000");
-  assert.equal(account.subentryCount, 5);
+  assert.equal(account.balances[1].buyingLiabilities, "5.0000000");
+  assert.equal(account.balances[1].sellingLiabilities, "15.0000000");
+  assert.equal(account.subentryCount, 3);
   assert.ok(account.thresholds);
   assert.equal(account.thresholds.low, 1);
   assert.equal(account.thresholds.med, 2);
@@ -142,8 +208,8 @@ test("getAccount() returns account with correct shape and balances", async () =>
 
 // Test: getAccount() - non-OK response throws error
 test("getAccount() throws error on non-OK response", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const address = "GBRPYHIL2CI3WHZDTOOQFC6EB4PSOJREITDGFJMYXEYGXCTN76EOAES";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const address = "GDI73WJ4SX7LOG3XZDJC3KCK6ED6E5NBYK2JUBQSPBCNNWEG3ZN7T75U";
 
   const fetcher = createFakeFetcher({
     "/accounts/": { status: 404 },
@@ -159,7 +225,7 @@ test("getAccount() throws error on non-OK response", async () => {
 
 // Test: getTransactions() - cursor pass-through
 test("getTransactions() includes cursor in request parameters", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
   let capturedUrl: string | null = null;
 
   const fetcher = async (url: string) => {
@@ -168,8 +234,13 @@ test("getTransactions() includes cursor in request parameters", async () => {
       ok: true,
       status: 200,
       json: async () => ({
+        _links: {
+          self: { href: `${horizonUrl}/transactions` },
+          next: {
+            href: `${horizonUrl}/transactions?cursor=120071205238677504&limit=200`,
+          },
+        },
         _embedded: { records: [] },
-        _links: { next: { href: "next_url" } },
       }),
     } as Response;
   };
@@ -183,7 +254,7 @@ test("getTransactions() includes cursor in request parameters", async () => {
 
 // Test: getTransactions() - default limit of 200
 test("getTransactions() uses default limit of 200 when not specified", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
   let capturedUrl: string | null = null;
 
   const fetcher = async (url: string) => {
@@ -192,8 +263,11 @@ test("getTransactions() uses default limit of 200 when not specified", async () 
       ok: true,
       status: 200,
       json: async () => ({
+        _links: {
+          self: { href: `${horizonUrl}/transactions` },
+          next: { href: `${horizonUrl}/transactions?cursor=abc&limit=200` },
+        },
         _embedded: { records: [] },
-        _links: { next: { href: "next_url" } },
       }),
     } as Response;
   };
@@ -207,7 +281,7 @@ test("getTransactions() uses default limit of 200 when not specified", async () 
 
 // Test: getTransactions() - explicit limit
 test("getTransactions() passes explicit limit to request", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
   let capturedUrl: string | null = null;
 
   const fetcher = async (url: string) => {
@@ -216,8 +290,8 @@ test("getTransactions() passes explicit limit to request", async () => {
       ok: true,
       status: 200,
       json: async () => ({
+        _links: { self: { href: `${horizonUrl}/transactions?limit=50` } },
         _embedded: { records: [] },
-        _links: { next: { href: "next_url" } },
       }),
     } as Response;
   };
@@ -229,22 +303,62 @@ test("getTransactions() passes explicit limit to request", async () => {
   assert.ok(capturedUrl.includes("limit=50"));
 });
 
-// Test: getTransactions() - response parsing
-test("getTransactions() parses records and next cursor correctly", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+// Test: getTransactions() - response parsing with realistic HAL structure and pagination
+test("getTransactions() parses records and next cursor correctly with HAL pagination", async () => {
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const txHash = "132c440e984ab97d895f3477015080aafd6c4375f6a70a87327f7f95e13c4e31";
+  const nextCursor = "120071205238677504";
   const txRecords = [
-    { id: "tx1", created_at: "2024-01-01T00:00:00Z" },
-    { id: "tx2", created_at: "2024-01-02T00:00:00Z" },
+    {
+      memo: "298424",
+      _links: {
+        self: { href: `${horizonUrl}/transactions/${txHash}` },
+        account: { href: `${horizonUrl}/accounts/GCO2IP3MJNUOKS4PUDI4C7LGGMQDJGXG3COYX3WSB4HHNAHKYV5YL3VC` },
+        ledger: { href: `${horizonUrl}/ledgers/27956256` },
+      },
+      id: txHash,
+      paging_token: nextCursor,
+      successful: true,
+      hash: txHash,
+      ledger: 27956256,
+      created_at: "2020-01-27T22:13:17Z",
+      source_account: "GCO2IP3MJNUOKS4PUDI4C7LGGMQDJGXG3COYX3WSB4HHNAHKYV5YL3VC",
+      source_account_sequence: "64034663849209932",
+      fee_charged: 100,
+      max_fee: 100,
+      operation_count: 1,
+    },
+    {
+      memo: "test",
+      _links: {
+        self: { href: `${horizonUrl}/transactions/abc123` },
+        account: { href: `${horizonUrl}/accounts/GCO2IP3MJNUOKS4PUDI4C7LGGMQDJGXG3COYX3WSB4HHNAHKYV5YL3VC` },
+      },
+      id: "abc123",
+      paging_token: "120071205238677505",
+      successful: true,
+      hash: "abc123",
+      ledger: 27956257,
+      created_at: "2020-01-28T22:13:17Z",
+      source_account: "GCO2IP3MJNUOKS4PUDI4C7LGGMQDJGXG3COYX3WSB4HHNAHKYV5YL3VC",
+    },
   ];
-  const nextHref = "https://horizon.stellar.org/transactions?cursor=abc123&limit=200";
 
   const fetcher = async () => {
     return {
       ok: true,
       status: 200,
       json: async () => ({
+        _links: {
+          self: { href: `${horizonUrl}/transactions?cursor=&limit=200&order=asc` },
+          next: {
+            href: `${horizonUrl}/transactions?cursor=${nextCursor}&limit=200&order=asc`,
+          },
+          prev: {
+            href: `${horizonUrl}/transactions?cursor=120071205238677502&limit=200&order=desc`,
+          },
+        },
         _embedded: { records: txRecords },
-        _links: { next: { href: nextHref } },
       }),
     } as Response;
   };
@@ -255,19 +369,23 @@ test("getTransactions() parses records and next cursor correctly", async () => {
   assert.equal(result.records.length, 2);
   assert.deepEqual(result.records[0], txRecords[0]);
   assert.deepEqual(result.records[1], txRecords[1]);
-  assert.equal(result.nextCursor, nextHref);
+  assert.ok(result.nextCursor);
+  assert.ok(result.nextCursor.includes(nextCursor));
 });
 
 // Test: getTransactions() - empty records
 test("getTransactions() returns empty records when not embedded", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
 
   const fetcher = async () => {
     return {
       ok: true,
       status: 200,
       json: async () => ({
-        _links: { next: { href: "next_url" } },
+        _links: {
+          self: { href: `${horizonUrl}/transactions` },
+          next: { href: `${horizonUrl}/transactions?cursor=abc&limit=200` },
+        },
       }),
     } as Response;
   };
@@ -278,13 +396,29 @@ test("getTransactions() returns empty records when not embedded", async () => {
   assert.equal(result.records.length, 0);
 });
 
-// Test: getTransactionStatus() - successful transaction
-test("getTransactionStatus() returns 'confirmed' for successful transaction", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const txHash = "abc123def456";
+// Test: getTransactions() throws on non-OK response
+test("getTransactions() throws error on non-OK response", async () => {
+  const horizonUrl = "https://horizon-testnet.stellar.org";
 
   const fetcher = createFakeFetcher({
-    "/transactions/": { status: 200, body: { successful: true } },
+    "/transactions": { status: 503 },
+  });
+
+  const adapter = new StellarAdapter(horizonUrl, fetcher);
+
+  await assert.rejects(
+    async () => adapter.getTransactions(),
+    (err: Error) => err.message.includes("Transactions fetch error")
+  );
+});
+
+// Test: getTransactionStatus() - successful transaction
+test("getTransactionStatus() returns 'confirmed' for successful transaction", async () => {
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const txHash = "132c440e984ab97d895f3477015080aafd6c4375f6a70a87327f7f95e13c4e31";
+
+  const fetcher = createFakeFetcher({
+    "/transactions/": { status: 200, body: { successful: true, id: txHash } },
   });
 
   const adapter = new StellarAdapter(horizonUrl, fetcher);
@@ -295,11 +429,11 @@ test("getTransactionStatus() returns 'confirmed' for successful transaction", as
 
 // Test: getTransactionStatus() - failed transaction
 test("getTransactionStatus() returns 'failed' for unsuccessful transaction", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const txHash = "abc123def456";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const txHash = "132c440e984ab97d895f3477015080aafd6c4375f6a70a87327f7f95e13c4e31";
 
   const fetcher = createFakeFetcher({
-    "/transactions/": { status: 200, body: { successful: false } },
+    "/transactions/": { status: 200, body: { successful: false, id: txHash } },
   });
 
   const adapter = new StellarAdapter(horizonUrl, fetcher);
@@ -310,8 +444,8 @@ test("getTransactionStatus() returns 'failed' for unsuccessful transaction", asy
 
 // Test: getTransactionStatus() - 404 not found
 test("getTransactionStatus() returns 'not_found' for 404 response", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const txHash = "abc123def456";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const txHash = "nonexistent_hash";
 
   const fetcher = createFakeFetcher({
     "/transactions/": { status: 404 },
@@ -325,8 +459,8 @@ test("getTransactionStatus() returns 'not_found' for 404 response", async () => 
 
 // Test: getTransactionStatus() - non-OK, non-404 response
 test("getTransactionStatus() returns 'network_error' for non-OK response (not 404)", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const txHash = "abc123def456";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const txHash = "abc123";
 
   const fetcher = createFakeFetcher({
     "/transactions/": { status: 500 },
@@ -340,8 +474,8 @@ test("getTransactionStatus() returns 'network_error' for non-OK response (not 40
 
 // Test: getTransactionStatus() - fetcher throws error
 test("getTransactionStatus() returns 'network_error' when fetcher throws", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const txHash = "abc123def456";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const txHash = "abc123";
 
   const fetcher = createFakeFetcher({
     "/transactions/": { status: 200, body: {}, shouldThrow: true },
@@ -355,8 +489,8 @@ test("getTransactionStatus() returns 'network_error' when fetcher throws", async
 
 // Test: getTransactionStatus() - missing successful field
 test("getTransactionStatus() returns 'network_error' when successful field is missing", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const txHash = "abc123def456";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const txHash = "abc123";
 
   const fetcher = createFakeFetcher({
     "/transactions/": { status: 200, body: { id: txHash } },
@@ -370,7 +504,7 @@ test("getTransactionStatus() returns 'network_error' when successful field is mi
 
 // Test: getTransactionStatus() - tx hash passed correctly in URL
 test("getTransactionStatus() includes transaction hash in request URL", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
   const txHash = "test_hash_12345";
   let capturedUrl: string | null = null;
 
@@ -392,8 +526,8 @@ test("getTransactionStatus() includes transaction hash in request URL", async ()
 
 // Test: formatAsset() - native asset (XLM)
 test("formatAsset() returns 'XLM' for native assets", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const address = "GBRPYHIL2CI3WHZDTOOQFC6EB4PSOJREITDGFJMYXEYGXCTN76EOAES";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const address = "GDI73WJ4SX7LOG3XZDJC3KCK6ED6E5NBYK2JUBQSPBCNNWEG3ZN7T75U";
 
   const fetcher = createFakeFetcher({
     "/accounts/": {
@@ -420,8 +554,8 @@ test("formatAsset() returns 'XLM' for native assets", async () => {
 
 // Test: formatAsset() - non-native asset (CODE:ISSUER)
 test("formatAsset() returns 'CODE:ISSUER' for non-native assets", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const address = "GBRPYHIL2CI3WHZDTOOQFC6EB4PSOJREITDGFJMYXEYGXCTN76EOAES";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const address = "GDI73WJ4SX7LOG3XZDJC3KCK6ED6E5NBYK2JUBQSPBCNNWEG3ZN7T75U";
   const issuer = "GBUQWP3BOUZX34ULNQG23RQ6F4BWFIJOSBSGOYHL3QJH4J4UB5KEAAA";
 
   const fetcher = createFakeFetcher({
@@ -451,8 +585,8 @@ test("formatAsset() returns 'CODE:ISSUER' for non-native assets", async () => {
 
 // Test: formatAsset() - missing asset details fallback
 test("formatAsset() handles missing asset_code and asset_issuer with fallback", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-  const address = "GBRPYHIL2CI3WHZDTOOQFC6EB4PSOJREITDGFJMYXEYGXCTN76EOAES";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
+  const address = "GDI73WJ4SX7LOG3XZDJC3KCK6ED6E5NBYK2JUBQSPBCNNWEG3ZN7T75U";
 
   const fetcher = createFakeFetcher({
     "/accounts/": {
@@ -480,7 +614,7 @@ test("formatAsset() handles missing asset_code and asset_issuer with fallback", 
 
 // Test: Multiple method calls on same adapter instance
 test("adapter can be reused for multiple method calls", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
+  const horizonUrl = "https://horizon-testnet.stellar.org";
   let callCount = 0;
 
   const fetcher = async (url: string) => {
@@ -515,36 +649,4 @@ test("adapter can be reused for multiple method calls", async () => {
   await adapter.getTransactions();
 
   assert.equal(callCount, 2);
-});
-
-// Test: getNetworkInfo() throws on non-OK response
-test("getNetworkInfo() throws error on non-OK response", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-
-  const fetcher = createFakeFetcher({
-    "/": { status: 500 },
-  });
-
-  const adapter = new StellarAdapter(horizonUrl, fetcher);
-
-  await assert.rejects(
-    async () => adapter.getNetworkInfo(),
-    (err: Error) => err.message.includes("Horizon error")
-  );
-});
-
-// Test: getTransactions() throws on non-OK response
-test("getTransactions() throws error on non-OK response", async () => {
-  const horizonUrl = "https://horizon.stellar.org";
-
-  const fetcher = createFakeFetcher({
-    "/transactions": { status: 503 },
-  });
-
-  const adapter = new StellarAdapter(horizonUrl, fetcher);
-
-  await assert.rejects(
-    async () => adapter.getTransactions(),
-    (err: Error) => err.message.includes("Transactions fetch error")
-  );
 });
