@@ -49,7 +49,7 @@ export class StellarAdapter {
       subentryCount: Number(data.subentry_count ?? 0),
       thresholds,
       signers: data.signers,
-      data: data.data_attr,
+      data: data.data,
     } as StellarAccount;
   }
 

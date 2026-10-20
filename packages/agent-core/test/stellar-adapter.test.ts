@@ -170,7 +170,7 @@ test("getAccount() returns account with correct shape and balances", async () =>
         type: "ed25519_public_key",
       },
     ],
-    data_attr: {
+    data: {
       custom_key: "custom_value",
     },
     paging_token: "",
@@ -370,7 +370,10 @@ test("getTransactions() parses records and next cursor correctly with HAL pagina
   assert.deepEqual(result.records[0], txRecords[0]);
   assert.deepEqual(result.records[1], txRecords[1]);
   assert.ok(result.nextCursor);
-  assert.ok(result.nextCursor.includes(nextCursor));
+  assert.equal(
+    result.nextCursor,
+    `${horizonUrl}/transactions?cursor=${nextCursor}&limit=200&order=asc`
+  );
 });
 
 // Test: getTransactions() - empty records
