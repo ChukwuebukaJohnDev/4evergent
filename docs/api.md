@@ -121,8 +121,8 @@ Every error response is JSON of the form `{"code": "<CODE>", "error": "<message>
 with an appropriate 4xx/5xx status. `code` is the stable, machine-readable
 contract; `error` is human-readable and may change. `VALIDATION_ERROR` may also
 carry a `details` field with field-specific messages. Unknown paths return
-`{"code":"NOT_FOUND","error":"Not found"}` with `404`. Some endpoints return
-message-shaped bodies (noted where they differ). Request bodies are limited to 1 MB.
+`{"code":"NOT_FOUND","error":"Not found"}` with `404`. Approve and reject errors additionally keep
+the approval fields (`approvalId`, `activityId`, `status`, `message`). Request bodies are limited to 1 MB.
 
 ### Error codes
 
@@ -146,7 +146,10 @@ message-shaped bodies (noted where they differ). Request bodies are limited to 1
 | `AGENT_NOT_ACTIVE` | 409 | The agent is paused or disabled. |
 | `INVALID_EXECUTION_STATE` | 409 | The execution status does not allow the requested action. |
 | `MAX_RETRIES_REACHED` | 409 | The execution has used all retry attempts. |
+| `APPROVAL_INVALID_STATE` | 409 | The approval status does not allow the requested approve or reject. |
+| `SCHEDULE_INVALID_TRANSITION` | 409 | The schedule status does not allow the requested pause, resume or disable. |
 | `EXECUTION_CONFLICT` | 409 | The execution changed concurrently. |
+| `APPROVAL_EXPIRED` | 410 | The approval passed its expiry before it was approved. |
 
 ---
 
@@ -256,12 +259,14 @@ identity is taken from the authenticated principal's `subject`.
 
 - `200` → `{ approvalId, activityId, agentId:"", status:"approved",
   message }` — execution is enqueued (persistent queue) or deferred
-- `409` → invalid state transition (e.g. already approved)
-- `410` → approval expired
-- `404` → not found or not owned (response body is approval-response
-  shaped with status `rejected`, not `{"error"}`)
+- `409` → `APPROVAL_INVALID_STATE` (e.g. already approved)
+- `410` → `APPROVAL_EXPIRED`
+- `404` → `APPROVAL_NOT_FOUND` (not found or not owned)
 
-Raw XDR in body → `400` with `{"message": ...}` (message-shaped).
+Each error body carries `code` and `error` plus the approval-response fields
+(`approvalId`, `activityId`, `status`, `message`).
+
+Raw XDR in body → `400` `RAW_TRANSACTION_REJECTED`.
 
 ### POST /approvals/:id/reject
 

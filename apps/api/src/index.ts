@@ -1221,7 +1221,7 @@ export async function createApiServer(options: ServerOptions) {
     if (!schedule) return apiError(res, "SCHEDULE_NOT_FOUND");
 
     if (!SCHEDULE_TRANSITIONS[schedule.status]?.includes(action)) {
-      return json(res, { error: `cannot ${action} schedule in status '${schedule.status}'` }, 409);
+      return apiError(res, "SCHEDULE_INVALID_TRANSITION", { message: `cannot ${action} schedule in status '${schedule.status}'` });
     }
 
     const status = action === "pause" ? "paused" : action === "resume" ? "active" : "disabled";
@@ -1542,7 +1542,7 @@ export async function createApiServer(options: ServerOptions) {
     }
 
     if (isRawTransaction(body)) {
-      return json(res, { message: "raw XDR and transaction blobs are not accepted at the approve endpoint" }, 400);
+      return approvalError(res, "RAW_TRANSACTION_REJECTED", { approvalId, activityId: "", status: "rejected", message: "raw XDR and transaction blobs are not accepted at the approve endpoint" });
     }
 
     // Phase 28K-2: Actor from authenticated principal subject
@@ -1550,20 +1550,20 @@ export async function createApiServer(options: ServerOptions) {
 
     const approval = await approvals.get(approvalId);
     if (!approval) {
-      return json(res, toApprovalResponse(approvalId, "", "rejected", "approval not found"), 404);
+      return approvalError(res, "APPROVAL_NOT_FOUND", { approvalId, activityId: "", status: "rejected", message: "approval not found" });
     }
 
     const canApprove = await authorizationService.canApprove(ctx, approvalId);
-    if (!canApprove) return json(res, toApprovalResponse(approvalId, "", "rejected", "approval not found"), 404);
+    if (!canApprove) return approvalError(res, "APPROVAL_NOT_FOUND", { approvalId, activityId: "", status: "rejected", message: "approval not found" });
 
     const transitionError = validateApprovalTransition(approval.status, "approved");
     if (transitionError) {
-      return json(res, toApprovalResponse(approvalId, approval.activityId, approval.status, `cannot approve: ${transitionError}`), 409);
+      return approvalError(res, "APPROVAL_INVALID_STATE", { approvalId, activityId: approval.activityId, status: approval.status, message: `cannot approve: ${transitionError}` });
     }
 
     if (approval.expiresAt && new Date(approval.expiresAt) < new Date()) {
       await approvals.update(approvalId, { status: "expired", expiredAt: new Date().toISOString() });
-      return json(res, toApprovalResponse(approvalId, approval.activityId, "expired", "approval expired"), 410);
+      return approvalError(res, "APPROVAL_EXPIRED", { approvalId, activityId: approval.activityId, status: "expired", message: "approval expired" });
     }
 
     await approvals.update(approvalId, { status: "approved", approvedAt: new Date().toISOString(), approver: approver ?? null });
@@ -1624,20 +1624,20 @@ export async function createApiServer(options: ServerOptions) {
     }
 
     if (isRawTransaction(body)) {
-      return json(res, { message: "raw XDR and transaction blobs are not accepted at the reject endpoint" }, 400);
+      return approvalError(res, "RAW_TRANSACTION_REJECTED", { approvalId, activityId: "", status: "rejected", message: "raw XDR and transaction blobs are not accepted at the reject endpoint" });
     }
 
     const approval = await approvals.get(approvalId);
     if (!approval) {
-      return json(res, toApprovalResponse(approvalId, "", "rejected", "approval not found"), 404);
+      return approvalError(res, "APPROVAL_NOT_FOUND", { approvalId, activityId: "", status: "rejected", message: "approval not found" });
     }
 
     const canReject = await authorizationService.canReject(ctx, approvalId);
-    if (!canReject) return json(res, toApprovalResponse(approvalId, "", "rejected", "approval not found"), 404);
+    if (!canReject) return approvalError(res, "APPROVAL_NOT_FOUND", { approvalId, activityId: "", status: "rejected", message: "approval not found" });
 
     const transitionError = validateApprovalTransition(approval.status, "rejected");
     if (transitionError) {
-      return json(res, toApprovalResponse(approvalId, approval.activityId, approval.status, `cannot reject: ${transitionError}`), 409);
+      return approvalError(res, "APPROVAL_INVALID_STATE", { approvalId, activityId: approval.activityId, status: approval.status, message: `cannot reject: ${transitionError}` });
     }
 
     await approvals.update(approvalId, { status: "rejected", rejectedAt: new Date().toISOString() });
@@ -1657,6 +1657,13 @@ export async function createApiServer(options: ServerOptions) {
       txHash: rec.txHash,
       error: rec.error,
     };
+  }
+
+  // Approve/reject errors keep the ApprovalResponse fields (including `message`)
+  // and add the structured `code` and `error` so every error carries a code.
+  function approvalError(res: any, code: ApiErrorCode, r: { approvalId: string; activityId: string; status: ApprovalStatus; message: string }) {
+    const def = API_ERRORS[code];
+    return json(res, { code, error: r.message, ...toApprovalResponse(r.approvalId, r.activityId, r.status, r.message) }, def.status);
   }
 
   function toApprovalResponse(approvalId: string, activityId: string, status: ApprovalStatus, message: string): ApprovalResponse {
@@ -1748,6 +1755,7 @@ function apiError(res: any, code: ApiErrorCode, opts: { message?: string; detail
   if (opts.details !== undefined) body.details = opts.details;
   return json(res, body, def.status);
 }
+
 /**
  * Legal schedule actions per current status. No-ops (pause when paused,
  * resume when active, disable when disabled) are rejected so callers get a
