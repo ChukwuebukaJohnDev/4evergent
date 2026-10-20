@@ -265,7 +265,10 @@ export FOREGENT_API_KEY=your-api-key
 4evergent activity list <agent-id>
 4evergent schedule list <agent-id>
 4evergent intent submit <agent-id> <type> [args...]
+4evergent completion <bash|zsh>
 ```
+
+Shell completion for Bash and Zsh can be generated with `4evergent completion bash` or `4evergent completion zsh`; see [Shell completion](docs/cli.md#shell-completion) for installation instructions.
 
 To run the source version from a repository checkout:
 

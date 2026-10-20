@@ -64,6 +64,55 @@ is optional when the API is running in development authentication mode.
 4evergent schedule get <agent-id> <sch-id>  Show schedule detail
 4evergent intent submit <agent-id> <type> [args...] [--idempotency-key <key>]
                                             Submit an intent (see Intent types below)
+4evergent completion <bash|zsh>             Generate shell completion script
+```
+
+## Shell completion
+
+`4evergent` can generate tab-completion scripts for `bash` and `zsh`. Completion generation works offline (no API server or network required) and covers top-level commands, subcommands, and fixed-value arguments (intent types and shells).
+
+### Bash
+
+Load completion in your current Bash session:
+
+```bash
+source <(4evergent completion bash)
+```
+
+Enable completion permanently by adding it to your `~/.bashrc`:
+
+```bash
+echo 'source <(4evergent completion bash)' >> ~/.bashrc
+```
+
+Or save to your system completions directory:
+
+```bash
+4evergent completion bash | sudo tee /etc/bash_completion.d/4evergent > /dev/null
+```
+
+### Zsh
+
+Load completion in your current Zsh session:
+
+```zsh
+source <(4evergent completion zsh)
+```
+
+Enable completion permanently by adding it to your `~/.zshrc`:
+
+```zsh
+echo 'source <(4evergent completion zsh)' >> ~/.zshrc
+```
+
+Or write to a completion function in your `$fpath` (for example `~/.zfunc/_4evergent`):
+
+```zsh
+mkdir -p ~/.zfunc
+4evergent completion zsh > ~/.zfunc/_4evergent
+# Ensure ~/.zshrc includes:
+#   fpath=(~/.zfunc $fpath)
+#   autoload -Uz compinit && compinit
 ```
 
 ## Intent submission

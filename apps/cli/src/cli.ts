@@ -14,6 +14,8 @@
 
 import { exit } from "node:process";
 import { createRequire } from "node:module";
+import { COMMAND_TREE, COMMANDS_HELP, buildCommandTree, dispatchCommand } from "./commands.js";
+import { generateCompletion } from "./completion.js";
 
 // The build replaces this lookup with the package version for a standalone CLI.
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
@@ -848,120 +850,70 @@ async function cmdScheduleDelete(agentId: string, scheduleId: string) {
 
 // --- CLI dispatch ---
 
+// --- CLI dispatch ---
+
 const argv = process.argv.slice(2);
 
-const COMMANDS_HELP = [
-  "Commands:",
-  "  --version, -v  Print the CLI package version",
-  "  health",
-  "  agent list | get <id> | create <name> | pause <id> | resume <id> | disable <id>",
-  "  approval list | approve <id> | reject <id>",
-  "  execution list | get <id> | retry <id> | cancel <id>",
-  "  policy get <agent-id> | update <agent-id>",
-  "  activity list <agent-id> [limit] | get <agent-id> <activity-id>",
-  "  schedule list <agent-id> [limit] | get <agent-id> <schedule-id> | create <agent-id> <cron> <intent> | update <agent-id> <schedule-id> <cron> | pause <agent-id> <schedule-id> | resume <agent-id> <schedule-id> | disable <agent-id> <schedule-id> | delete <agent-id> <schedule-id>",
-  "  intent submit <agent-id> <type> [args...] [--idempotency-key <key>]",
-].join("\n");
+export const dispatcherTree = buildCommandTree({
+  health: () => cmdHealth(),
+  agent: {
+    list: () => cmdAgentList(),
+    get: (args) => cmdAgentGet(args[0] ?? ""),
+    create: (args) => cmdAgentCreate(args),
+    pause: (args) => cmdAgentStatus(args[0] ?? "", "paused"),
+    resume: (args) => cmdAgentStatus(args[0] ?? "", "active"),
+    disable: (args) => cmdAgentStatus(args[0] ?? "", "disabled"),
+  },
+  approval: {
+    list: () => cmdApprovalList(),
+    get: (args) => cmdApprovalGet(args[0] ?? ""),
+    approve: (args) => cmdApprovalAction(args[0] ?? "", "approve"),
+    reject: (args) => cmdApprovalAction(args[0] ?? "", "reject"),
+  },
+  execution: {
+    list: () => cmdExecutionList(),
+    get: (args) => cmdExecutionGet(args[0] ?? ""),
+    retry: (args) => cmdExecutionRetry(args[0] ?? ""),
+    cancel: (args) => cmdExecutionCancel(args[0] ?? ""),
+  },
+  policy: {
+    get: (args) => cmdPolicyGet(args[0] ?? ""),
+    update: (args) => cmdPolicyUpdate(args[0] ?? "", args.slice(1)),
+  },
+  activity: {
+    list: (args) => cmdActivityList(args[0] ?? "", args[1] ?? ""),
+    get: (args) => cmdActivityGet(args[0] ?? "", args[1] ?? ""),
+  },
+  schedule: {
+    list: (args) => cmdScheduleList(args[0] ?? "", args[1] ?? ""),
+    get: (args) => cmdScheduleGet(args[0] ?? "", args[1] ?? ""),
+    create: (args) => cmdScheduleCreate(args[0] ?? "", args.slice(1)),
+    update: (args) => cmdScheduleUpdate(args[0] ?? "", args.slice(1)),
+    pause: (args) => cmdSchedulePause(args[0] ?? "", args[1] ?? ""),
+    resume: (args) => cmdScheduleResume(args[0] ?? "", args[1] ?? ""),
+    disable: (args) => cmdScheduleDisable(args[0] ?? "", args[1] ?? ""),
+    delete: (args) => cmdScheduleDelete(args[0] ?? "", args[1] ?? ""),
+  },
+  intent: {
+    submit: (args) => cmdIntentSubmit(args[0] ?? "", args.slice(1), null),
+  },
+  completion: {
+    bash: () => {
+      process.stdout.write(generateCompletion("bash", COMMAND_TREE));
+      return 0;
+    },
+    zsh: () => {
+      process.stdout.write(generateCompletion("zsh", COMMAND_TREE));
+      return 0;
+    },
+  },
+});
 
 async function main(): Promise<number> {
-  const cmd = argv[0];
-  const sub = argv[1];
-
-  if (cmd === "--version" || cmd === "-v") {
-    console.log(VERSION);
-    return 0;
-  }
-
-  if (!cmd) {
-    console.error(`Usage: 4evergent <command> [args...]\n\n${COMMANDS_HELP}`);
-    return 1;
-  }
-
-  switch (cmd) {
-    case "health":
-      return cmdHealth();
-    case "agent":
-      switch (sub) {
-        case "list": return cmdAgentList();
-        case "get": return cmdAgentGet(argv[2] ?? "");
-        case "create": return cmdAgentCreate(argv.slice(2));
-        case "pause": return cmdAgentStatus(argv[2] ?? "", "paused");
-        case "resume": return cmdAgentStatus(argv[2] ?? "", "active");
-        case "disable": return cmdAgentStatus(argv[2] ?? "", "disabled");
-        default:
-          console.error(`Unknown agent subcommand: ${sub}`);
-          console.error("Usage: 4evergent agent <list|get|create|pause|resume|disable> [id]");
-          return 1;
-      }
-    case "approval":
-      switch (sub) {
-        case "list": return cmdApprovalList();
-        case "get": return cmdApprovalGet(argv[2] ?? "");
-        case "approve": return cmdApprovalAction(argv[2] ?? "", "approve");
-        case "reject": return cmdApprovalAction(argv[2] ?? "", "reject");
-        default:
-          console.error(`Unknown approval subcommand: ${sub}`);
-          console.error("Usage: 4evergent approval <list|get|approve|reject> [id]");
-          return 1;
-      }
-    case "execution":
-      switch (sub) {
-        case "list": return cmdExecutionList();
-        case "get": return cmdExecutionGet(argv[2] ?? "");
-        case "retry": return cmdExecutionRetry(argv[2] ?? "");
-        case "cancel": return cmdExecutionCancel(argv[2] ?? "");
-        default:
-          console.error(`Unknown execution subcommand: ${sub}`);
-          console.error("Usage: 4evergent execution <list|get|retry|cancel> [id]");
-          return 1;
-      }
-    case "policy":
-      switch (sub) {
-        case "get": return cmdPolicyGet(argv[2] ?? "");
-        case "update": return cmdPolicyUpdate(argv[2] ?? "", argv.slice(3));
-        default:
-          console.error("Usage: 4evergent policy <get|update> <agent-id>");
-          return 1;
-      }
-    case "activity":
-      switch (sub) {
-        case "list": return cmdActivityList(argv[2] ?? "", argv[3] ?? "");
-        case "get": return cmdActivityGet(argv[2] ?? "", argv[3] ?? "");
-        default:
-          console.error("Usage: 4evergent activity <list <agent-id> [limit] | get <agent-id> <activity-id>>");
-          return 1;
-      }
-    case "schedule":
-      switch (sub) {
-        case "list": return cmdScheduleList(argv[2] ?? "", argv[3] ?? "");
-        case "get": return cmdScheduleGet(argv[2] ?? "", argv[3] ?? "");
-        case "create": return cmdScheduleCreate(argv[2] ?? "", argv.slice(3));
-        case "update": return cmdScheduleUpdate(argv[2] ?? "", argv.slice(3));
-        case "pause": return cmdSchedulePause(argv[2] ?? "", argv[3] ?? "");
-        case "resume": return cmdScheduleResume(argv[2] ?? "", argv[3] ?? "");
-        case "disable": return cmdScheduleDisable(argv[2] ?? "", argv[3] ?? "");
-        case "delete": return cmdScheduleDelete(argv[2] ?? "", argv[3] ?? "");
-        default:
-          console.error("Usage: 4evergent schedule <list|get|create|update|pause|resume|disable|delete> [args...]");
-          return 1;
-      }
-    case "intent":
-      switch (sub) {
-        case "submit": return cmdIntentSubmit(argv[2] ?? "", argv.slice(3), null);
-        default:
-          console.error("Usage: 4evergent intent submit <agent-id> <type> [args...] [--idempotency-key <key>]");
-          console.error("Types: payment | trustline | contract_call");
-          return 1;
-      }
-    case "--help":
-    case "-h":
-    case "help":
-      console.log(`4evergent Operator CLI\n\n${COMMANDS_HELP}`);
-      return 0;
-    default:
-      console.error(`Unknown command: ${cmd}`);
-      return 1;
-  }
+  return dispatchCommand(dispatcherTree, argv, {
+    version: VERSION,
+    helpText: COMMANDS_HELP,
+  });
 }
 
 main().then((code) => exit(requestTimedOut ? EXIT_TIMEOUT : code)).catch((err) => {
