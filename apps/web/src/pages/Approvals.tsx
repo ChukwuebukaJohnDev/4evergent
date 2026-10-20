@@ -45,7 +45,12 @@ export default function Approvals() {
       .finally(() => setLoadingId(null));
   };
 
-  if (error) return <EmptyState title="Failed to load approvals" message={error} error={true} />;
+  const retry = () => {
+    setError(null);
+    loadPage(0, true).catch(() => {});
+  };
+
+  if (error) return <EmptyState title="Failed to load approvals" message={error} error={true} actionLabel="Retry" onAction={retry} />;
   if (approvals === null) return <Skeleton label="Loading approvals..." />;
   if (approvals.length === 0) {
     return (

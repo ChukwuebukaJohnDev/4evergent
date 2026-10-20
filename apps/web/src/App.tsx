@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import { clearAuth } from './auth';
 import { api } from './api';
 import LogoMark from './components/LogoMark';
@@ -146,41 +147,85 @@ function OperatorBadge() {
 }
 
 /* ==========================================================================
+   Error Boundary
+   Catches render errors from any page so a single bad component cannot
+   unmount the whole app. "Try again" resets the boundary, re-mounting the
+   router and the route tree below it.
+   ========================================================================== */
+
+interface ErrorBoundaryState {
+  error: Error | null;
+}
+
+export class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  override state: ErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Unhandled render error:', error, info.componentStack);
+  }
+
+  private handleReset = () => {
+    this.setState({ error: null });
+  };
+
+  override render() {
+    if (this.state.error) {
+      return (
+        <div className="error-boundary" role="alert">
+          <h1>Something went wrong</h1>
+          <p>{this.state.error.message || 'An unexpected error occurred.'}</p>
+          <button type="button" className="btn btn-primary" onClick={this.handleReset}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ==========================================================================
    Main App Router
    ========================================================================== */
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Public landing page */}
-        <Route path="/" element={<Landing />} />
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Routes>
+          {/* Public landing page */}
+          <Route path="/" element={<Landing />} />
 
-        {/* Protected application */}
-        <Route
-          path="/*"
-          element={
-            <RequireAuth>
-              <Layout>
-                <Routes>
-                  <Route path="/overview" element={<Overview />} />
-                  <Route path="/approvals" element={<Approvals />} />
-                  <Route path="/approvals/:approvalId" element={<ApprovalDetail />} />
-                  <Route path="/executions" element={<Executions />} />
-                  <Route path="/executions/:executionId" element={<ExecutionDetail />} />
-                  <Route path="/activity" element={<Activity />} />
-                  <Route path="/agents/:agentId/activity/:activityId" element={<ActivityDetail />} />
-                  <Route path="/agents" element={<Agents />} />
-                  <Route path="/agents/:agentId" element={<AgentDetail />} />
-                  <Route path="/submit" element={<Submit />} />
-                  <Route path="/login" element={<Navigate to="/overview" replace />} />
-                  <Route path="*" element={<Navigate to="/overview" replace />} />
-                </Routes>
-              </Layout>
-            </RequireAuth>
-          }
-        />
-      </Routes>
-    </BrowserRouter>
+          {/* Protected application */}
+          <Route
+            path="/*"
+            element={
+              <RequireAuth>
+                <Layout>
+                  <Routes>
+                    <Route path="/overview" element={<Overview />} />
+                    <Route path="/approvals" element={<Approvals />} />
+                    <Route path="/approvals/:approvalId" element={<ApprovalDetail />} />
+                    <Route path="/executions" element={<Executions />} />
+                    <Route path="/executions/:executionId" element={<ExecutionDetail />} />
+                    <Route path="/activity" element={<Activity />} />
+                    <Route path="/agents/:agentId/activity/:activityId" element={<ActivityDetail />} />
+                    <Route path="/agents" element={<Agents />} />
+                    <Route path="/agents/:agentId" element={<AgentDetail />} />
+                    <Route path="/submit" element={<Submit />} />
+                    <Route path="/login" element={<Navigate to="/overview" replace />} />
+                    <Route path="*" element={<Navigate to="/overview" replace />} />
+                  </Routes>
+                </Layout>
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

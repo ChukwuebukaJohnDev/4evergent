@@ -48,17 +48,22 @@ export default function ExecutionDetail() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!executionId) return;
+    setLoading(true);
+    setError(null);
     api.getExecution(executionId)
       .then((r) => setExecution(r.execution))
       .catch((e: any) => setError(describeApiError(e, 'Failed to load execution')))
       .finally(() => setLoading(false));
-  }, [executionId]);
+  }, [executionId, reloadKey]);
+
+  const retry = () => setReloadKey((k) => k + 1);
 
   if (loading) return <Skeleton label="Loading execution..." />;
-  if (error) return <EmptyState title="Failed to load execution" message={error} error={true} />;
+  if (error) return <EmptyState title="Failed to load execution" message={error} error={true} actionLabel="Retry" onAction={retry} />;
   if (!execution) return (
     <EmptyState title="Execution not found" message="This execution does not exist or you do not have access." />
   );

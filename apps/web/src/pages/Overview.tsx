@@ -21,8 +21,13 @@ export default function Overview() {
   const [loading, setLoading] = useState(true);
   const [attention, setAttention] = useState<AttentionCounts | null>(null);
   const [attentionError, setAttentionError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setAttentionError(null);
     (async () => {
       try {
         const [h, a, ap, act] = await Promise.all([
@@ -31,6 +36,7 @@ export default function Overview() {
           api.listApprovals('pending_approval'),
           api.listActivity(),
         ]);
+        if (cancelled) return;
         setHealth(h.signerAccountId);
         setAgents(a.agents);
         setApprovals(ap.approvals);
@@ -38,20 +44,23 @@ export default function Overview() {
 
         try {
           const att = await api.getOverviewAttention();
-          setAttention(att);
+          if (!cancelled) setAttention(att);
         } catch (e: any) {
-          setAttentionError(e.message ?? 'Failed to load operational status');
+          if (!cancelled) setAttentionError(e.message ?? 'Failed to load operational status');
         }
       } catch (e: any) {
-        setError(e.message ?? 'Failed to fetch');
+        if (!cancelled) setError(e.message ?? 'Failed to fetch');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [reloadKey]);
+
+  const retry = () => setReloadKey((k) => k + 1);
 
   if (loading) return <Skeleton label="Connecting to API..." />;
-  if (error) return <EmptyState title="API Unavailable" message={error} error={true} />;
+  if (error) return <EmptyState title="API Unavailable" message={error} error={true} actionLabel="Retry" onAction={retry} />;
 
   const activeAgents = agents.filter((a) => a.status === 'active').length;
   const pausedAgents = agents.filter((a) => a.status === 'paused').length;
