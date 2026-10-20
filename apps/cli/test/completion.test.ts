@@ -4,7 +4,7 @@
  * Verifies:
  *   1. Bidirectional consistency between declared COMMAND_TREE and CLI dispatcher
  *   2. Generated completion scripts for bash and zsh from COMMAND_TREE
- *   3. Fixed-value argument completions (agent status, intent types, shells)
+ *   3. Fixed-value argument completions (intent types, shells)
  *   4. Offline generation without network or running API server
  *   5. Sourced completion script behavior in real Bash shell
  */
@@ -18,9 +18,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import {
   COMMAND_TREE,
-  AGENT_STATUS_VALUES,
   INTENT_TYPES,
   SUPPORTED_SHELLS,
+  buildCommandTree,
+  dispatchCommand,
 } from "../src/commands.js";
 import {
   generateBashCompletion,
@@ -133,87 +134,139 @@ function run(
 }
 
 // ============================================================================
-// 1. Bidirectional Consistency: Tree <-> Dispatcher
+// 1. Bidirectional Consistency: Declared Tree <-> Dispatcher Tree
 // ============================================================================
 
-test("Tree and Dispatcher consistency: parse cli.ts switch cases and verify agreement", () => {
-  const cliSource = readFileSync(CLI, "utf-8");
+test("Tree and Dispatcher consistency: verified across declared tree and dispatchCommand", async () => {
+  const called: string[] = [];
+  const mockHandlers = {
+    health: () => { called.push("health"); return 0; },
+    agent: {
+      list: () => { called.push("agent.list"); return 0; },
+      get: (args: string[]) => { called.push(`agent.get:${args.join(",")}`); return 0; },
+      create: (args: string[]) => { called.push(`agent.create:${args.join(",")}`); return 0; },
+      pause: (args: string[]) => { called.push(`agent.pause:${args.join(",")}`); return 0; },
+      resume: (args: string[]) => { called.push(`agent.resume:${args.join(",")}`); return 0; },
+      disable: (args: string[]) => { called.push(`agent.disable:${args.join(",")}`); return 0; },
+    },
+    approval: {
+      list: () => { called.push("approval.list"); return 0; },
+      get: (args: string[]) => { called.push(`approval.get:${args.join(",")}`); return 0; },
+      approve: (args: string[]) => { called.push(`approval.approve:${args.join(",")}`); return 0; },
+      reject: (args: string[]) => { called.push(`approval.reject:${args.join(",")}`); return 0; },
+    },
+    execution: {
+      list: () => { called.push("execution.list"); return 0; },
+      get: (args: string[]) => { called.push(`execution.get:${args.join(",")}`); return 0; },
+      retry: (args: string[]) => { called.push(`execution.retry:${args.join(",")}`); return 0; },
+      cancel: (args: string[]) => { called.push(`execution.cancel:${args.join(",")}`); return 0; },
+    },
+    policy: {
+      get: (args: string[]) => { called.push(`policy.get:${args.join(",")}`); return 0; },
+      update: (args: string[]) => { called.push(`policy.update:${args.join(",")}`); return 0; },
+    },
+    activity: {
+      list: (args: string[]) => { called.push(`activity.list:${args.join(",")}`); return 0; },
+      get: (args: string[]) => { called.push(`activity.get:${args.join(",")}`); return 0; },
+    },
+    schedule: {
+      list: (args: string[]) => { called.push(`schedule.list:${args.join(",")}`); return 0; },
+      get: (args: string[]) => { called.push(`schedule.get:${args.join(",")}`); return 0; },
+      create: (args: string[]) => { called.push(`schedule.create:${args.join(",")}`); return 0; },
+      update: (args: string[]) => { called.push(`schedule.update:${args.join(",")}`); return 0; },
+      pause: (args: string[]) => { called.push(`schedule.pause:${args.join(",")}`); return 0; },
+      resume: (args: string[]) => { called.push(`schedule.resume:${args.join(",")}`); return 0; },
+      disable: (args: string[]) => { called.push(`schedule.disable:${args.join(",")}`); return 0; },
+      delete: (args: string[]) => { called.push(`schedule.delete:${args.join(",")}`); return 0; },
+    },
+    intent: {
+      submit: (args: string[]) => { called.push(`intent.submit:${args.join(",")}`); return 0; },
+    },
+    completion: {
+      bash: () => { called.push("completion.bash"); return 0; },
+      zsh: () => { called.push("completion.zsh"); return 0; },
+    },
+  };
 
-  // Extract the main command switch block: between `switch (cmd) {` and `case "--help":`
-  const mainSwitchMatch = cliSource.match(/async function main[\s\S]*?switch\s*\(\s*cmd\s*\)\s*\{([\s\S]*?)\n\s*case "--help":/);
-  assert.ok(mainSwitchMatch, "Must find switch (cmd) block in cli.ts");
-  const mainSwitchBody = mainSwitchMatch[1]!;
+  const tree = buildCommandTree(mockHandlers);
 
-  const topCases: string[] = [];
-  const dispatchedTree: Record<string, string[]> = {};
-
-  // Top-level cases are indented with 4 spaces in cli.ts main()
-  const topCmdRegex = /\n {4}case "([^"]+)":([\s\S]*?)(?=(?:\n {4}case "|$))/g;
-  let m: RegExpExecArray | null;
-
-  while ((m = topCmdRegex.exec(mainSwitchBody)) !== null) {
-    const cmdName = m[1]!;
-    const block = m[2]!;
-    topCases.push(cmdName);
-
-    // Subcommand cases are indented with 8 spaces inside their respective sub-switch
-    const subRegex = /\n {8}case "([^"]+)":/g;
-    const subs: string[] = [];
-    let sm: RegExpExecArray | null;
-    while ((sm = subRegex.exec(block)) !== null) {
-      subs.push(sm[1]!);
-    }
-    dispatchedTree[cmdName] = subs;
-  }
-
-  // Direction 1: Every command in COMMAND_TREE appears in the dispatcher
+  // Direction 1: Every command in COMMAND_TREE exists in tree and has a working handler
   for (const [cmdName, cmdDef] of Object.entries(COMMAND_TREE)) {
+    const handlerCmd = tree[cmdName];
     assert.ok(
-      topCases.includes(cmdName),
-      `Command '${cmdName}' from COMMAND_TREE must be dispatched in cli.ts main switch`
+      handlerCmd,
+      `Command '${cmdName}' from COMMAND_TREE must exist in runtime tree`
     );
 
     if (cmdDef.subcommands) {
-      const dispatchedSubs = dispatchedTree[cmdName] ?? [];
+      assert.ok(
+        handlerCmd.subcommands,
+        `Command '${cmdName}' in runtime tree must have subcommands`
+      );
       for (const subName of Object.keys(cmdDef.subcommands)) {
+        const subDef = handlerCmd.subcommands[subName];
         assert.ok(
-          dispatchedSubs.includes(subName),
-          `Subcommand '${cmdName} ${subName}' from COMMAND_TREE must be dispatched in cli.ts sub-switch`
+          subDef,
+          `Subcommand '${cmdName} ${subName}' from COMMAND_TREE must exist in runtime tree`
         );
+        assert.equal(
+          typeof subDef.run,
+          "function",
+          `Subcommand '${cmdName} ${subName}' in runtime tree must have a run() handler`
+        );
+
+        // Verify dispatchCommand routes directly to this subcommand handler
+        called.length = 0;
+        const code = await dispatchCommand(tree, [cmdName, subName], { version: "1.0.0" });
+        assert.equal(code, 0);
+        assert.ok(called.length > 0, `dispatchCommand should route to '${cmdName} ${subName}'`);
       }
+    } else {
+      assert.equal(
+        typeof handlerCmd.run,
+        "function",
+        `Top-level command '${cmdName}' in runtime tree must have a run() handler`
+      );
+
+      called.length = 0;
+      const code = await dispatchCommand(tree, [cmdName], { version: "1.0.0" });
+      assert.equal(code, 0);
+      assert.ok(called.length > 0, `dispatchCommand should route to '${cmdName}'`);
     }
   }
 
-  // Direction 2: Every dispatched command in cli.ts appears in COMMAND_TREE
-  for (const cmdName of topCases) {
+  // Direction 2: Every command in runtime tree exists in declared COMMAND_TREE
+  for (const [cmdName, handlerCmd] of Object.entries(tree)) {
+    const treeCmd = COMMAND_TREE[cmdName];
     assert.ok(
-      cmdName in COMMAND_TREE,
-      `Dispatched command '${cmdName}' in cli.ts must exist in declared COMMAND_TREE`
+      treeCmd,
+      `Command '${cmdName}' in runtime tree must exist in declared COMMAND_TREE`
     );
 
-    const dispatchedSubs = dispatchedTree[cmdName] ?? [];
-    const treeSubcommands = COMMAND_TREE[cmdName]?.subcommands ?? {};
-    for (const subName of dispatchedSubs) {
+    if (handlerCmd.subcommands) {
       assert.ok(
-        subName in treeSubcommands,
-        `Dispatched subcommand '${cmdName} ${subName}' in cli.ts must exist in declared COMMAND_TREE`
+        treeCmd.subcommands,
+        `Command '${cmdName}' in COMMAND_TREE must have subcommands`
       );
+      for (const subName of Object.keys(handlerCmd.subcommands)) {
+        assert.ok(
+          subName in treeCmd.subcommands,
+          `Subcommand '${cmdName} ${subName}' in runtime tree must exist in declared COMMAND_TREE`
+        );
+      }
     }
   }
 });
 
 test("Dispatcher reachability: every command and subcommand in the tree reaches a real handler", () => {
-  // Test that running each command does not exit with "Unknown command" or "Unknown subcommand"
   for (const [cmdName, cmdDef] of Object.entries(COMMAND_TREE)) {
     if (!cmdDef.subcommands) {
-      // Top level command without subcommands (e.g. health)
       const r = run([cmdName], {
         responses: [{ match: "/health", status: 200, body: { status: "ok", signerAccountId: "GAAA" } }],
       });
       assert.doesNotMatch(r.stderr, new RegExp(`Unknown command: ${cmdName}`));
     } else {
       for (const subName of Object.keys(cmdDef.subcommands)) {
-        // Run with mock responses so it doesn't fail on network if reached
         const r = run([cmdName, subName], {
           responses: [
             { match: "/", status: 200, body: { ok: true, agents: [], approvals: [], executions: [] } },
@@ -243,13 +296,13 @@ test("CLI: 4evergent completion bash prints working bash script", () => {
   }
 
   // Must contain subcommands
-  assert.ok(r.stdout.includes("pause resume disable status"));
+  assert.ok(r.stdout.includes("pause resume disable"));
   assert.ok(r.stdout.includes("approve reject"));
 
+  // Must NOT contain unmaintained additions like agent status
+  assert.ok(!r.stdout.includes("agent status"));
+
   // Must contain fixed-value arguments
-  for (const status of AGENT_STATUS_VALUES) {
-    assert.ok(r.stdout.includes(status), `Bash script must include status value '${status}'`);
-  }
   for (const type of INTENT_TYPES) {
     assert.ok(r.stdout.includes(type), `Bash script must include intent type '${type}'`);
   }
@@ -274,14 +327,13 @@ test("CLI: 4evergent completion zsh prints working zsh script", () => {
   assert.ok(r.stdout.includes("pause:"));
   assert.ok(r.stdout.includes("resume:"));
   assert.ok(r.stdout.includes("disable:"));
-  assert.ok(r.stdout.includes("status:"));
   assert.ok(r.stdout.includes("approve:"));
   assert.ok(r.stdout.includes("reject:"));
 
+  // Must NOT contain unmaintained additions like agent status
+  assert.ok(!r.stdout.includes("status:Set agent status"));
+
   // Must contain fixed-value arguments
-  for (const status of AGENT_STATUS_VALUES) {
-    assert.ok(r.stdout.includes(status), `Zsh script must include status value '${status}'`);
-  }
   for (const type of INTENT_TYPES) {
     assert.ok(r.stdout.includes(type), `Zsh script must include intent type '${type}'`);
   }
@@ -312,40 +364,7 @@ test("CLI: completion with invalid shell reports error and exits 1", () => {
 });
 
 // ============================================================================
-// 3. Agent Status Subcommand Dispatched Handling
-// ============================================================================
-
-test("CLI: agent status <id> <active|paused|disabled> dispatches PATCH with status", () => {
-  for (const status of AGENT_STATUS_VALUES) {
-    const r = run(["agent", "status", "agent-1", status], {
-      responses: [
-        {
-          match: "/agents/agent-1/status",
-          status: 200,
-          body: { id: "agent-1", status },
-        },
-      ],
-    });
-    assert.equal(r.code, 0);
-    assert.match(r.stdout, new RegExp(`Agent agent-1 status: ${status}`));
-    assert.equal(r.requests.length, 1);
-    assert.equal(r.requests[0]?.method, "PATCH");
-    assert.deepEqual(r.requests[0]?.body, { status });
-  }
-});
-
-test("CLI: agent status missing status or invalid status shows usage", () => {
-  const r1 = run(["agent", "status", "agent-1"]);
-  assert.equal(r1.code, 1);
-  assert.match(r1.stderr, /Usage: 4evergent agent status <id> <active\|paused\|disabled>/);
-
-  const r2 = run(["agent", "status", "agent-1", "invalid-status"]);
-  assert.equal(r2.code, 1);
-  assert.match(r2.stderr, /Usage: 4evergent agent status <id> <active\|paused\|disabled>/);
-});
-
-// ============================================================================
-// 4. Real Shell Completion Simulation (in Bash)
+// 3. Real Shell Completion Simulation (in Bash)
 // ============================================================================
 
 test("Real Bash completion: script executes correctly under bash", () => {
@@ -372,19 +391,13 @@ test("Real Bash completion: script executes correctly under bash", () => {
     _4evergent_completion
     echo "AGENT_SUBS: \${COMPREPLY[*]}"
 
-    # 4. Status argument completion
-    COMP_WORDS=(4evergent agent status agent-1 "")
-    COMP_CWORD=4
-    _4evergent_completion
-    echo "AGENT_STATUS: \${COMPREPLY[*]}"
-
-    # 5. Intent submit type completion
+    # 4. Intent submit type completion
     COMP_WORDS=(4evergent intent submit agent-1 "")
     COMP_CWORD=4
     _4evergent_completion
     echo "INTENT_TYPES: \${COMPREPLY[*]}"
 
-    # 6. Completion shell completion
+    # 5. Completion shell completion
     COMP_WORDS=(4evergent completion "")
     COMP_CWORD=2
     _4evergent_completion
@@ -396,8 +409,8 @@ test("Real Bash completion: script executes correctly under bash", () => {
 
   assert.match(res.stdout, /TOP:.*health.*agent.*approval.*completion/);
   assert.match(res.stdout, /PREFIX: agent/);
-  assert.match(res.stdout, /AGENT_SUBS:.*list.*get.*create.*pause.*resume.*disable.*status/);
-  assert.match(res.stdout, /AGENT_STATUS: active paused disabled/);
+  assert.match(res.stdout, /AGENT_SUBS: list get create pause resume disable/);
+  assert.ok(!res.stdout.includes("status"), "Must not complete agent status");
   assert.match(res.stdout, /INTENT_TYPES: payment trustline contract_call/);
   assert.match(res.stdout, /SHELLS: bash zsh/);
 });

@@ -69,7 +69,7 @@ is optional when the API is running in development authentication mode.
 
 ## Shell completion
 
-`4evergent` can generate tab-completion scripts for `bash` and `zsh`. Completion generation works offline (no API server or network required) and covers top-level commands, subcommands, and fixed-value arguments (agent statuses, intent types, and shells).
+`4evergent` can generate tab-completion scripts for `bash` and `zsh`. Completion generation works offline (no API server or network required) and covers top-level commands, subcommands, and fixed-value arguments (intent types and shells).
 
 ### Bash
 
