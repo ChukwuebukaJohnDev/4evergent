@@ -6,10 +6,15 @@ import { getStoredToken, clearAuth } from './auth';
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Machine-readable error code from the API; 'UNKNOWN' when the server sent none. */
+  code: string;
+  details?: unknown;
+  constructor(status: number, message: string, code = 'UNKNOWN', details?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
+    this.details = details;
   }
 }
 
@@ -44,7 +49,7 @@ async function request<T>(path: string, init?: RequestInit & { skipAuthClear?: b
     if (res.status === 401 && !skipAuthClear) {
       clearAuth();
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body?.code ?? 'UNKNOWN', body?.details);
   }
   return body as T;
 }

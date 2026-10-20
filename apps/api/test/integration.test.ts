@@ -91,7 +91,7 @@ test("API returns 400 for invalid JSON body", async () => {
     });
     const body = await res.json();
     assert.equal(res.status, 400);
-    assert.equal(body.error, "invalid JSON body");
+    assert.equal(body.code, "INVALID_JSON");
   } finally {
     await close();
   }
@@ -102,7 +102,7 @@ test("API returns 400 for raw XDR submission", async () => {
   try {
     const res = await post(baseUrl, "/agents/test-agent/intents", { xdr: "AAAA..." });
     assert.equal(res.status, 400);
-    assert.ok(res.body.error.includes("raw XDR"));
+    assert.equal(res.body.code, "RAW_TRANSACTION_REJECTED");
   } finally {
     await close();
   }
@@ -113,7 +113,7 @@ test("API returns 400 for raw operations array", async () => {
   try {
     const res = await post(baseUrl, "/agents/test-agent/intents", { operations: [{ type: "payment" }] });
     assert.equal(res.status, 400);
-    assert.ok(res.body.error.includes("raw XDR"));
+    assert.equal(res.body.code, "RAW_TRANSACTION_REJECTED");
   } finally {
     await close();
   }
@@ -124,7 +124,7 @@ test("API returns 400 for tx_blob field", async () => {
   try {
     const res = await post(baseUrl, "/agents/test-agent/intents", { tx_blob: "AAAA..." });
     assert.equal(res.status, 400);
-    assert.ok(res.body.error.includes("raw XDR"));
+    assert.equal(res.body.code, "RAW_TRANSACTION_REJECTED");
   } finally {
     await close();
   }
@@ -141,7 +141,40 @@ test("API returns 404 for unknown agent", async () => {
       reason: "test",
     });
     assert.equal(res.status, 404);
-    assert.equal(res.body.error, "agent not found");
+    assert.equal(res.body.code, "AGENT_NOT_FOUND");
+    assert.equal(res.body.error, "Agent not found");
+  } finally {
+    await close();
+  }
+});
+
+test("API error responses carry a code alongside the error string", async () => {
+  const { baseUrl, close } = await startServer();
+  try {
+    const cases: Array<[string, string, number, string]> = [
+      ["/no-such-route", "NOT_FOUND", 404, "Not found"],
+      ["/agents/unknown-agent", "AGENT_NOT_FOUND", 404, "Agent not found"],
+      ["/approvals/unknown-approval", "APPROVAL_NOT_FOUND", 404, "Approval not found"],
+      ["/executions/unknown-execution", "EXECUTION_NOT_FOUND", 404, "Execution not found"],
+    ];
+    for (const [path, code, status, error] of cases) {
+      const res = await get(baseUrl, path);
+      assert.equal(res.status, status, path);
+      assert.equal(res.body.code, code, path);
+      assert.equal(res.body.error, error, path);
+    }
+  } finally {
+    await close();
+  }
+});
+
+test("API returns VALIDATION_ERROR for an invalid agent create body", async () => {
+  const { baseUrl, close } = await startServer();
+  try {
+    const res = await post(baseUrl, "/agents", { displayName: "" });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, "VALIDATION_ERROR");
+    assert.equal(typeof res.body.error, "string");
   } finally {
     await close();
   }

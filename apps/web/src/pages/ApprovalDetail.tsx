@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
+import { describeApiError } from '../apiErrors';
 import type { ApprovalRecord } from '../types';
 import { StatusBadge, Skeleton, EmptyState, DetailCard } from '../components';
 
@@ -16,7 +17,7 @@ export default function ApprovalDetail() {
     if (!approvalId) return;
     api.approvalDetail(approvalId)
       .then((r) => setApproval(r.approval))
-      .catch((e: any) => setError(e.message ?? 'Failed to load approval'))
+      .catch((e: any) => setError(describeApiError(e, 'Failed to load approval')))
       .finally(() => setLoading(false));
   }, [approvalId]);
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api';
+import { describeApiError } from '../apiErrors';
 import type { AgentRecord, ActivityRecord, PolicyRules } from '../types';
 import { ScheduleManagement } from './ScheduleManagement';
 import { ExecutionList } from './ExecutionList';
@@ -43,7 +44,7 @@ function StatusControls({
       const res = await api.updateAgentStatus(agentId, newStatus);
       onStatusChange(res.status);
     } catch (e: any) {
-      setError(e.message ?? 'Failed to update status');
+      setError(describeApiError(e, 'Failed to update status'));
     } finally {
       setMutating(null);
     }
