@@ -95,11 +95,24 @@ export function Skeleton({ label }: { label: string }) {
    EmptyState
    ========================================================================== */
 
-export function EmptyState({ title, message, error }: { title: string; message: string; error?: boolean }) {
+export function EmptyState({
+  title,
+  message,
+  error,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  message: string;
+  error?: boolean;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   return (
     <div className="empty-state" {...(error ? { role: 'alert' } : {})}>
       <h3>{title}</h3>
       <p>{message}</p>
+      {actionLabel && onAction && <Button onClick={onAction}>{actionLabel}</Button>}
     </div>
   );
 }

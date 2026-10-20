@@ -91,12 +91,17 @@ export default function Executions({ onExecutionClick }: { onExecutionClick?: (i
     loadPage(nextOffset, false).finally(() => setLoadingMore(false));
   };
 
+  const retry = () => {
+    setError(null);
+    loadInitial();
+  };
+
   useEffect(() => {
     loadInitial();
   }, [loadInitial]);
 
   if (loading) return <Skeleton label="Loading executions..." />;
-  if (error) return <EmptyState title="Failed to load executions" message={error} error={true} />;
+  if (error) return <EmptyState title="Failed to load executions" message={error} error={true} actionLabel="Retry" onAction={retry} />;
   if (executions === null) return <Skeleton label="Loading executions..." />;
 
   const filtered = filter === 'all'

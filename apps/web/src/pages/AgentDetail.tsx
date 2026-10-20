@@ -473,6 +473,7 @@ export default function AgentDetail() {
   const [activity, setActivity] = useState<ActivityRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [spending, setSpending] = useState<SpendingData | null>(null);
   const [spendingError, setSpendingError] = useState<string | null>(null);
@@ -489,27 +490,34 @@ export default function AgentDetail() {
   }, [agentId]);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     (async () => {
       try {
         const [a, act] = await Promise.all([
           api.getAgent(agentId),
           api.agentActivity(agentId, 20),
         ]);
+        if (cancelled) return;
         setAgent(a);
         setActivity(act.activity);
       } catch (e: any) {
-        setError(e.message);
+        if (!cancelled) setError(e.message);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [agentId]);
+    return () => { cancelled = true; };
+  }, [agentId, reloadKey]);
+
+  const retry = () => setReloadKey((k) => k + 1);
 
   if (loading) {
     return <Skeleton label="Loading agent..." />;
   }
   if (error) {
-    return <EmptyState title="Failed to load agent" message={error} error={true} />;
+    return <EmptyState title="Failed to load agent" message={error} error={true} actionLabel="Retry" onAction={retry} />;
   }
   if (!agent) {
     return (

@@ -81,7 +81,12 @@ export default function Agents() {
     }
   };
 
-  if (error) return <EmptyState title="Failed to load agents" message={error} error={true} />;
+  const retry = () => {
+    setError(null);
+    load();
+  };
+
+  if (error) return <EmptyState title="Failed to load agents" message={error} error={true} actionLabel="Retry" onAction={retry} />;
   if (agents === null) return <Skeleton label="Loading agents..." />;
 
   return (

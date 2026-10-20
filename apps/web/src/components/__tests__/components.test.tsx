@@ -268,6 +268,23 @@ describe('Shared UI Components', () => {
       expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('No items');
       expect(screen.getByText('Nothing to display at this time.')).toBeInTheDocument();
     });
+
+    it('renders an action button when actionLabel and onAction are provided', () => {
+      const onAction = vi.fn();
+      render(<EmptyState title="Failed to load" message="Boom" actionLabel="Retry" onAction={onAction} />);
+      const button = screen.getByRole('button', { name: 'Retry' });
+      expect(button).toBeInTheDocument();
+      fireEvent.click(button);
+      expect(onAction).toHaveBeenCalledTimes(1);
+    });
+
+    it('renders no action button when only one of actionLabel/onAction is provided', () => {
+      const { rerender } = render(<EmptyState title="t" message="m" actionLabel="Retry" />);
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+
+      rerender(<EmptyState title="t" message="m" onAction={() => {}} />);
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
   });
 
   describe('LifecycleTrail', () => {

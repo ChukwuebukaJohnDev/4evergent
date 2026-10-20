@@ -34,7 +34,12 @@ export default function Activity() {
     loadPage(nextOffset, false).finally(() => setLoadingMore(false));
   };
 
-  if (error) return <EmptyState title="Failed to load activity" message={error} error={true} />;
+  const retry = () => {
+    setError(null);
+    loadPage(0, true).catch(() => {});
+  };
+
+  if (error) return <EmptyState title="Failed to load activity" message={error} error={true} actionLabel="Retry" onAction={retry} />;
   if (activity === null) return <Skeleton label="Loading activity..." />;
   if (activity.length === 0) {
     return (
