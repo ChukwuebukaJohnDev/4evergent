@@ -45,7 +45,7 @@ export default function Approvals() {
       .finally(() => setLoadingId(null));
   };
 
-  if (error) return <EmptyState title="Failed to load approvals" message={error} />;
+  if (error) return <EmptyState title="Failed to load approvals" message={error} error={true} />;
   if (approvals === null) return <Skeleton label="Loading approvals..." />;
   if (approvals.length === 0) {
     return (

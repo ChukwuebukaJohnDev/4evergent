@@ -96,7 +96,7 @@ export default function Executions({ onExecutionClick }: { onExecutionClick?: (i
   }, [loadInitial]);
 
   if (loading) return <Skeleton label="Loading executions..." />;
-  if (error) return <EmptyState title="Failed to load executions" message={error} />;
+  if (error) return <EmptyState title="Failed to load executions" message={error} error={true} />;
   if (executions === null) return <Skeleton label="Loading executions..." />;
 
   const filtered = filter === 'all'

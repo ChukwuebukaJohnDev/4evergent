@@ -62,7 +62,7 @@ export default function ApprovalDetail() {
   };
 
   if (loading) return <Skeleton label="Loading approval..." />;
-  if (error) return <EmptyState title="Failed to load approval" message={error} />;
+  if (error) return <EmptyState title="Failed to load approval" message={error} error={true} />;
   if (!approval) return (
     <EmptyState title="Approval not found" message="This approval does not exist or you do not have access." />
   );
