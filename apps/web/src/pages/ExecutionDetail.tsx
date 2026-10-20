@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
+import { describeApiError } from '../apiErrors';
 import type { ExecutionRecord, ExecutionStatus } from '../types';
 import { Skeleton, EmptyState, DetailCard, IntentAmount } from '../components';
 
@@ -52,12 +53,12 @@ export default function ExecutionDetail() {
     if (!executionId) return;
     api.getExecution(executionId)
       .then((r) => setExecution(r.execution))
-      .catch((e: any) => setError(e.message ?? 'Failed to load execution'))
+      .catch((e: any) => setError(describeApiError(e, 'Failed to load execution')))
       .finally(() => setLoading(false));
   }, [executionId]);
 
   if (loading) return <Skeleton label="Loading execution..." />;
-  if (error) return <EmptyState title="Failed to load execution" message={error} />;
+  if (error) return <EmptyState title="Failed to load execution" message={error} error={true} />;
   if (!execution) return (
     <EmptyState title="Execution not found" message="This execution does not exist or you do not have access." />
   );
@@ -76,13 +77,13 @@ export default function ExecutionDetail() {
       setExecution(r.execution);
     } catch (e: any) {
       if (e.status === 409) {
-        setActionError(e.message ?? 'Conflict: execution state changed');
+        setActionError(describeApiError(e, 'Conflict: execution state changed'));
         try {
           const r = await api.getExecution(executionId);
           setExecution(r.execution);
         } catch { /* ignore refresh failure */ }
       } else {
-        setActionError(e.message ?? 'Retry failed');
+        setActionError(describeApiError(e, 'Retry failed'));
       }
     } finally {
       setActionLoading(null);
@@ -98,13 +99,13 @@ export default function ExecutionDetail() {
       setExecution(r.execution);
     } catch (e: any) {
       if (e.status === 409) {
-        setActionError(e.message ?? 'Conflict: execution state changed');
+        setActionError(describeApiError(e, 'Conflict: execution state changed'));
         try {
           const r = await api.getExecution(executionId);
           setExecution(r.execution);
         } catch { /* ignore refresh failure */ }
       } else {
-        setActionError(e.message ?? 'Cancel failed');
+        setActionError(describeApiError(e, 'Cancel failed'));
       }
     } finally {
       setActionLoading(null);

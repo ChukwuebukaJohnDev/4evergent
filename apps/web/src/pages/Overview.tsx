@@ -51,7 +51,7 @@ export default function Overview() {
   }, []);
 
   if (loading) return <Skeleton label="Connecting to API..." />;
-  if (error) return <EmptyState title="API Unavailable" message={error} />;
+  if (error) return <EmptyState title="API Unavailable" message={error} error={true} />;
 
   const activeAgents = agents.filter((a) => a.status === 'active').length;
   const pausedAgents = agents.filter((a) => a.status === 'paused').length;

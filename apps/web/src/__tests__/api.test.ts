@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ApiError, isUnauthorizedError, isForbiddenError } from '../api';
+import { describeApiError } from '../apiErrors';
 import * as auth from '../auth';
 
 // `request()` is not exported from api.ts (only the `api` object and the
@@ -173,5 +174,42 @@ describe('auth module exports real functions', () => {
     expect(typeof auth.getStoredSubject).toBe('function');
     expect(typeof auth.storeSubject).toBe('function');
     expect(typeof auth.clearStoredSubject).toBe('function');
+  });
+});
+
+describe('ApiError code', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('defaults code to UNKNOWN', () => {
+    expect(new ApiError(500, 'boom').code).toBe('UNKNOWN');
+  });
+
+  it('carries code and details from the response body', async () => {
+    mockFetch(404, { code: 'AGENT_NOT_FOUND', error: 'Agent not found' });
+    const { api } = await import('../api');
+    const err = await api.getAgent('x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBe('AGENT_NOT_FOUND');
+    expect((err as ApiError).message).toBe('Agent not found');
+  });
+
+  it('falls back to UNKNOWN when the server sends no code', async () => {
+    mockFetch(500, { error: 'oops' });
+    const { api } = await import('../api');
+    const err = await api.getAgent('x').catch((e: unknown) => e);
+    expect((err as ApiError).code).toBe('UNKNOWN');
+  });
+});
+
+describe('describeApiError', () => {
+  it('maps a known code to a context-appropriate message', () => {
+    const msg = describeApiError(new ApiError(404, 'Approval not found', 'APPROVAL_NOT_FOUND'), 'fallback');
+    expect(msg).toBe('This approval does not exist.');
+  });
+
+  it('uses the server message for unknown codes', () => {
+    expect(describeApiError(new ApiError(400, 'bad thing', 'VALIDATION_ERROR'), 'fallback')).toBe('bad thing');
   });
 });

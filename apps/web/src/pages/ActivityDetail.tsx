@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { describeApiError } from '../apiErrors';
 import type { ActivityRecord, ExecutionRecord } from '../types';
 import { Skeleton, EmptyState, IntentAmount, DetailCard, Section, StatusBadge, Address } from '../components';
 
@@ -26,7 +27,7 @@ export default function ActivityDetail() {
         }
       })
       .catch((e: any) => {
-        if (!cancelled) setError(e.message ?? 'Failed to load activity');
+        if (!cancelled) setError(describeApiError(e, 'Failed to load activity'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

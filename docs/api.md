@@ -17,7 +17,7 @@ All endpoints except `GET /health` require authentication.
   See [security-model.md](security-model.md) — API Authentication.
 
 Unauthenticated requests to protected endpoints return
-`{"error":"unauthorized"}` with status `401`.
+`{"code":"UNAUTHORIZED","error":"unauthorized"}` with status `401`.
 
 ## User Authentication (Browser Sessions)
 
@@ -117,10 +117,39 @@ authenticated `ownerId`. Access to another owner's resource returns
 
 ## General error behavior
 
-Errors are ad-hoc JSON — most follow `{"error": "<message>"}` with an
-appropriate 4xx/5xx status, but some endpoints return message-shaped
-bodies (noted where they differ). Unknown paths return
-`{"error":"not found"}` with `404`. Request bodies are limited to 1 MB.
+Every error response is JSON of the form `{"code": "<CODE>", "error": "<message>"}`
+with an appropriate 4xx/5xx status. `code` is the stable, machine-readable
+contract; `error` is human-readable and may change. `VALIDATION_ERROR` may also
+carry a `details` field with field-specific messages. Unknown paths return
+`{"code":"NOT_FOUND","error":"Not found"}` with `404`. Approve and reject errors additionally keep
+the approval fields (`approvalId`, `activityId`, `status`, `message`). Request bodies are limited to 1 MB.
+
+### Error codes
+
+| Code | HTTP | Description |
+|---|---|---|
+| `UNAUTHORIZED` | 401 | Missing or invalid credentials. |
+| `CSRF_FAILED` | 403 | Session request failed the CSRF header check. |
+| `NOT_FOUND` | 404 | Unknown route. |
+| `AGENT_NOT_FOUND` | 404 | The agent does not exist or is not owned by the caller. |
+| `APPROVAL_NOT_FOUND` | 404 | The approval does not exist or is not owned by the caller. |
+| `EXECUTION_NOT_FOUND` | 404 | The execution does not exist or is not owned by the caller. |
+| `SCHEDULE_NOT_FOUND` | 404 | The schedule does not exist or is not owned by the caller. |
+| `ACTIVITY_NOT_FOUND` | 404 | The activity record does not exist or is not owned by the caller. |
+| `EXECUTION_QUEUE_DISABLED` | 404 | The execution queue is not enabled on this server. |
+| `INVALID_PATH_PARAM` | 400 | A path identifier is missing or malformed. |
+| `INVALID_JSON` | 400 | The request body is not valid JSON. |
+| `VALIDATION_ERROR` | 400 | A field failed validation; see message and optional details. |
+| `RAW_TRANSACTION_REJECTED` | 400 | Raw transaction payloads are not accepted. |
+| `IDEMPOTENCY_KEY_INVALID` | 400 | The Idempotency-Key header is too long. |
+| `IDEMPOTENCY_CONFLICT` | 409 | The Idempotency-Key was already used with a different intent. |
+| `AGENT_NOT_ACTIVE` | 409 | The agent is paused or disabled. |
+| `INVALID_EXECUTION_STATE` | 409 | The execution status does not allow the requested action. |
+| `MAX_RETRIES_REACHED` | 409 | The execution has used all retry attempts. |
+| `APPROVAL_INVALID_STATE` | 409 | The approval status does not allow the requested approve or reject. |
+| `SCHEDULE_INVALID_TRANSITION` | 409 | The schedule status does not allow the requested pause, resume or disable. |
+| `EXECUTION_CONFLICT` | 409 | The execution changed concurrently. |
+| `APPROVAL_EXPIRED` | 410 | The approval passed its expiry before it was approved. |
 
 ---
 
@@ -250,12 +279,14 @@ identity is taken from the authenticated principal's `subject`.
 
 - `200` → `{ approvalId, activityId, agentId:"", status:"approved",
   message }` — execution is enqueued (persistent queue) or deferred
-- `409` → invalid state transition (e.g. already approved)
-- `410` → approval expired
-- `404` → not found or not owned (response body is approval-response
-  shaped with status `rejected`, not `{"error"}`)
+- `409` → `APPROVAL_INVALID_STATE` (e.g. already approved)
+- `410` → `APPROVAL_EXPIRED`
+- `404` → `APPROVAL_NOT_FOUND` (not found or not owned)
 
-Raw XDR in body → `400` with `{"message": ...}` (message-shaped).
+Each error body carries `code` and `error` plus the approval-response fields
+(`approvalId`, `activityId`, `status`, `message`).
+
+Raw XDR in body → `400` `RAW_TRANSACTION_REJECTED`.
 
 ### POST /approvals/:id/reject
 
@@ -418,6 +449,22 @@ Delete a schedule. `200` → `{ "deleted": true }`.
 Transition schedule status (`paused` / `active` / `disabled`).
 `200` → `{ "schedule" }`.
 
+The current status is validated before writing. A transition that is not
+legal, including a no-op, returns `409` with
+`{ "error": "cannot <action> schedule in status '<current>'" }` and the
+schedule is left unchanged. No-ops are rejected rather than treated as
+idempotent so callers get a signal that nothing changed.
+
+| Current status | pause | resume | disable |
+|---|---|---|---|
+| `active` | `200` (paused) | `409` | `200` (disabled) |
+| `paused` | `409` | `200` (active) | `200` (disabled) |
+| `disabled` | `409` | `200` (active) | `409` |
+
+`disabled` is reversible: `resume` is accepted from `disabled`, which matches
+the dashboard's Resume button. Making it terminal would be a design decision
+for the maintainers (see #6 and #7 for the agent-side equivalent).
+
 ### Missed schedule runs
 
 An occurrence due now or no more than five minutes ago follows the normal
@@ -480,7 +527,7 @@ summaries and are not counted as failed or dead-letter executions in overview co
 
 Queue summary for the caller's executions. Returns
 `{ "running": boolean, "byStatus": Record<string, number> }`.
-`404` with `{"error":"execution queue not enabled"}` if the queue is off.
+`404` with `{"code":"EXECUTION_QUEUE_DISABLED",...}` if the queue is off.
 
 ---
 

@@ -36,6 +36,9 @@ export class InMemoryPolicyConfigStore implements PolicyConfigStore {
 
   async upsert(agentId: string, ownerId: string, rules: PolicyRules): Promise<{ rules: PolicyRules; version: number }> {
     const existing = this.configs.get(agentId);
+    if (existing && existing.ownerId !== ownerId) {
+      throw new Error(`Policy config for agent ${agentId} is owned by another user`);
+    }
     const now = new Date().toISOString();
     const newVersion = existing ? existing.version + 1 : 1;
     this.configs.set(agentId, {

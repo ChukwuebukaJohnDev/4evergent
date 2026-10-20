@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef , useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import type { AgentRecord } from '../types';
@@ -14,6 +14,8 @@ export default function Agents() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const modalRef = useRef<HTMLDivElement>(null);
+  const titleId = 'create-agent-title';
 
   const load = () => {
     api.listAgents()
@@ -22,6 +24,41 @@ export default function Agents() {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!showCreate) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    const focusable = () =>
+      Array.from(
+        modal.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+    const first = focusable()[0];
+    first?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowCreate(false);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const firstEl = items[0]!;
+      const lastEl = items[items.length - 1]!;
+      if (e.shiftKey && document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      } else if (!e.shiftKey && document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [showCreate]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +81,7 @@ export default function Agents() {
     }
   };
 
-  if (error) return <EmptyState title="Failed to load agents" message={error} />;
+  if (error) return <EmptyState title="Failed to load agents" message={error} error={true} />;
   if (agents === null) return <Skeleton label="Loading agents..." />;
 
   return (
@@ -54,7 +91,7 @@ export default function Agents() {
           <h1>Agents</h1>
           <p className="muted">Configure and manage your financial agents.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)} aria-haspopup="dialog">
           Create Agent
         </button>
       </div>
@@ -93,8 +130,8 @@ export default function Agents() {
 
       {showCreate && (
         <div className="modal-backdrop" onClick={() => setShowCreate(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Create Agent</h2>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={modalRef} onClick={(e) => e.stopPropagation()}>
+            <h2 id={titleId}>Create Agent</h2>
             <form onSubmit={handleCreate}>
               <div className="field">
                 <label htmlFor="agent-name">Name</label>
@@ -134,7 +171,7 @@ export default function Agents() {
                 <div className="field-hint">Capabilities this agent can execute.</div>
               </div>
 
-              {createError && <div className="error-banner">{createError}</div>}
+              {createError && <div className="error-banner" role="alert">{createError}</div>}
 
               <div className="form-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowCreate(false)} disabled={creating}>Cancel</button>

@@ -44,6 +44,9 @@ describe('Agents page', () => {
       expect(screen.getByText('Failed to load agents')).toBeInTheDocument();
       expect(screen.getByText('Failed to fetch agents')).toBeInTheDocument();
     });
+
+    // Error banner must be announced to screen readers
+    expect(screen.getByRole('alert')).toHaveTextContent('Failed to fetch agents');
   });
 
   it('renders empty state when there are no agents', async () => {
@@ -115,6 +118,52 @@ describe('Agents page', () => {
       expect(screen.getByLabelText('Name')).toBeInTheDocument();
       expect(screen.getByLabelText(/Description/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/Capabilities/i)).toBeInTheDocument();
+    });
+
+    it('exposes the modal as an accessible dialog', async () => {
+      mockListAgents.mockResolvedValue({ agents: [] });
+      render(
+        <MemoryRouter>
+          <Agents />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Create Agent' })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }));
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(dialog).toHaveAttribute('aria-labelledby');
+
+      const labelledById = dialog.getAttribute('aria-labelledby')!;
+      const title = document.getElementById(labelledById);
+      expect(title).toBeInTheDocument();
+      expect(title).toHaveTextContent('Create Agent');
+    });
+
+    it('closes the modal when Escape is pressed', async () => {
+      mockListAgents.mockResolvedValue({ agents: [] });
+      render(
+        <MemoryRouter>
+          <Agents />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Create Agent' })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }));
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
     });
 
     it('shows validation error when name is empty', async () => {
@@ -192,7 +241,7 @@ describe('Agents page', () => {
 
       // Modal closes on success
       await waitFor(() => {
-        expect(screen.queryByRole('heading', { name: 'Create Agent' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       });
     });
 
@@ -220,6 +269,9 @@ describe('Agents page', () => {
       await waitFor(() => {
         expect(screen.getByText('Agent name already exists')).toBeInTheDocument();
       });
+
+      // Modal error must be announced to screen readers
+      expect(screen.getByRole('alert')).toHaveTextContent('Agent name already exists');
     });
 
     it('closes modal when clicking Cancel button', async () => {
@@ -235,10 +287,10 @@ describe('Agents page', () => {
       });
 
       fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }));
-      expect(screen.getByRole('heading', { name: 'Create Agent' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-      expect(screen.queryByRole('heading', { name: 'Create Agent' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
 });
