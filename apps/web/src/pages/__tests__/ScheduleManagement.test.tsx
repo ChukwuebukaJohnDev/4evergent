@@ -97,6 +97,43 @@ describe('ScheduleManagement', () => {
     expect(screen.getByPlaceholderText('0 0 * * * (minute hour day-of-month month day-of-week)')).toBeInTheDocument();
   });
 
+  test('cron expression input has aria-describedby pointing at help text', async () => {
+    mockListSchedules.mockResolvedValue({ schedules: [] });
+
+    render(<MemoryRouter><ScheduleManagement agentId="agent-1" /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(screen.getByText('Create Schedule')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Create Schedule'));
+
+    const exprInput = screen.getByPlaceholderText('0 0 * * * (minute hour day-of-month month day-of-week)');
+    const describedBy = exprInput.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+
+    const helpText = document.getElementById(describedBy!);
+    expect(helpText).toBeInTheDocument();
+    expect(helpText?.textContent).toMatch(/minute/i);
+  });
+
+  test('form inputs have associated labels', async () => {
+    mockListSchedules.mockResolvedValue({ schedules: [] });
+
+    render(<MemoryRouter><ScheduleManagement agentId="agent-1" /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(screen.getByText('Create Schedule')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Create Schedule'));
+
+    expect(screen.getByLabelText(/amount/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/destination/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/reason/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/cron|schedule expression/i)).toBeInTheDocument();
+  });
+
   test('validation blocks invalid submission', async () => {
     mockListSchedules.mockResolvedValue({ schedules: [] });
 
@@ -226,6 +263,8 @@ describe('ScheduleManagement', () => {
     await waitFor(() => {
       expect(screen.getByText(/Invalid schedule expression/)).toBeInTheDocument();
     });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/Invalid schedule expression/);
   });
 
   test('duplicate create prevented while saving', async () => {

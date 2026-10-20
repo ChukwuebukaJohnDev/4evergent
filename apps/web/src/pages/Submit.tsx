@@ -16,7 +16,8 @@ export default function Submit() {
   const [intentType, setIntentType] = useState<'payment' | 'trustline'>('payment');
   const [amount, setAmount] = useState('');
   const [destination, setDestination] = useState('');
-  const [assetCode, setAssetCode] = useState('XLM');
+  const [assetCode, setAssetCode] = useState<'XLM' | 'USDC' | 'BTC' | 'other'>('XLM');
+  const [otherAssetCode, setOtherAssetCode] = useState('');
   const [issuer, setIssuer] = useState('');
   const [trustlineAssetCode, setTrustlineAssetCode] = useState('');
   const [trustlineIssuer, setTrustlineIssuer] = useState('');
@@ -47,10 +48,11 @@ export default function Submit() {
       if (!amount || parseFloat(amount) <= 0) { setLoading(false); return setError('Amount must be positive'); }
       if (!destination || !destination.startsWith('G')) { setLoading(false); return setError('Destination must be a valid Stellar account (G...)'); }
       const isNativeXLM = assetCode === 'XLM';
+      const actualAssetCode = assetCode === 'other' ? otherAssetCode : assetCode;
       const intent: SubmitPaymentIntent = {
         type: 'payment',
-        asset: assetCode === 'XLM' ? 'XLM' : assetCode,
-        ...((!isNativeXLM && issuer) ? { assetDetails: { code: assetCode, issuer } } : {}),
+        asset: actualAssetCode === 'XLM' ? 'XLM' : actualAssetCode,
+        ...((!isNativeXLM && issuer) ? { assetDetails: { code: actualAssetCode, issuer } } : {}),
         destination,
         amount,
         reason,
@@ -89,10 +91,11 @@ export default function Submit() {
         </div>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && <div className="error-banner" role="alert">{error}</div>}
       {result && (
         <div
           className="success-banner"
+          role="status"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -137,7 +140,7 @@ export default function Submit() {
           <>
             <div className="field">
               <label htmlFor="asset">Asset</label>
-              <select id="asset" value={assetCode} onChange={(e) => setAssetCode(e.target.value)} className="select">
+              <select id="asset" value={assetCode} onChange={(e) => setAssetCode(e.target.value as "XLM" | "USDC" | "BTC" | "other")} className="select">
                 <option value="XLM">XLM (native)</option>
                 <option value="USDC">USDC</option>
                 <option value="BTC">BTC</option>
@@ -147,7 +150,8 @@ export default function Submit() {
             {assetCode === 'other' && (
               <div className="field">
                 <label htmlFor="asset-code">Asset Code</label>
-                <input id="asset-code" type="text" value={assetCode === 'other' ? '' : assetCode} onChange={(e) => setAssetCode(e.target.value)} placeholder="e.g. USDC" className="input" />
+                <input id="asset-code" type="text" value={otherAssetCode} onChange={(e) => setOtherAssetCode(e.target.value)} placeholder="e.g. USDC" className="input" aria-describedby="asset-code-hint" />
+                <div id="asset-code-hint" className="field-hint">Enter the asset code, e.g. USDC.</div>
               </div>
             )}
             {assetCode !== 'XLM' && (
@@ -184,8 +188,8 @@ export default function Submit() {
 
         <div className="field">
           <label htmlFor="reason">Reason</label>
-          <input id="reason" type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Monthly payment" className="input" />
-          <div className="field-hint">Minimum 3 characters. Describes the purpose of this intent.</div>
+          <input id="reason" type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Monthly payment" className="input" aria-describedby="reason-hint" />
+          <div id="reason-hint" className="field-hint">Minimum 3 characters. Describes the purpose of this intent.</div>
         </div>
 
         <div className="form-actions">

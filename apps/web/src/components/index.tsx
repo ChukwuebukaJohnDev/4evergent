@@ -3,6 +3,7 @@
  * Reusable building blocks to reduce duplication across pages.
  */
 
+import * as React from 'react';
 import type { ActivityRecord, ExecutionRecord, ApprovalRecord, AgentRecord } from '../types';
 
 /* ==========================================================================
@@ -94,9 +95,9 @@ export function Skeleton({ label }: { label: string }) {
    EmptyState
    ========================================================================== */
 
-export function EmptyState({ title, message }: { title: string; message: string }) {
+export function EmptyState({ title, message, error }: { title: string; message: string; error?: boolean }) {
   return (
-    <div className="empty-state">
+    <div className="empty-state" {...(error ? { role: 'alert' } : {})}>
       <h3>{title}</h3>
       <p>{message}</p>
     </div>
@@ -334,3 +335,125 @@ export function PaginationFooter({
    ========================================================================== */
 
 export type { ActivityRecord as ActivityRecordType, ExecutionRecord as ExecutionRecordType };
+
+/* ==========================================================================
+   Field (accessible form field wrapper)
+   ========================================================================== */
+
+export function Field({
+  id,
+  label,
+  hint,
+  error,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      {children}
+      {hint && (
+        <span id={hintId} className="muted">
+          {hint}
+        </span>
+      )}
+      {error && (
+        <span id={errorId} role="alert" className="field-error">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ==========================================================================
+   ErrorBanner (announced to assistive tech)
+   ========================================================================== */
+
+export function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="error-banner" role="alert">
+      {message}
+    </div>
+  );
+}
+
+/* ==========================================================================
+   Modal (accessible dialog with focus trap and Escape-to-close)
+   ========================================================================== */
+
+export function Modal({
+  open,
+  titleId,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  titleId: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const node = ref.current;
+    if (!node) return;
+
+    const focusable = () =>
+      Array.from(
+        node.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+
+    const first = focusable()[0];
+    first?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const firstEl = items[0]!;
+      const lastEl = items[items.length - 1]!;
+      if (e.shiftKey && document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      } else if (!e.shiftKey && document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
+      }
+    };
+
+    node.addEventListener('keydown', onKeyDown);
+    return () => node.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="modal-backdrop">
+      <div
+        ref={ref}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}

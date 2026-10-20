@@ -57,7 +57,7 @@ export default function ExecutionDetail() {
   }, [executionId]);
 
   if (loading) return <Skeleton label="Loading execution..." />;
-  if (error) return <EmptyState title="Failed to load execution" message={error} />;
+  if (error) return <EmptyState title="Failed to load execution" message={error} error={true} />;
   if (!execution) return (
     <EmptyState title="Execution not found" message="This execution does not exist or you do not have access." />
   );
