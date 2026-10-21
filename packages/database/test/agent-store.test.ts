@@ -281,6 +281,93 @@ function testStores(name: string, makeStore: () => StoreFactoryResult) {
       cleanup?.();
     }
   });
+
+  test(`${name}: listByOwner default limit is MAX_LIMIT (${MAX_LIMIT})`, async () => {
+    const { store, cleanup } = makeStore();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await store.create({ displayName: `Agent ${i}`, ownerId: "owner-a" });
+      }
+      // Omitted limit → default MAX_LIMIT (200), so all 5 returned
+      const list = await store.listByOwner("owner-a");
+      assert.equal(list.length, 5);
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  test(`${name}: listByOwner limit=0 clamps to 1`, async () => {
+    const { store, cleanup } = makeStore();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await store.create({ displayName: `Agent ${i}`, ownerId: "owner-a" });
+      }
+      const list = await store.listByOwner("owner-a", 0);
+      assert.equal(list.length, 1);
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  test(`${name}: listByOwner limit exceeding MAX_LIMIT clamps to MAX_LIMIT`, async () => {
+    const { store, cleanup } = makeStore();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await store.create({ displayName: `Agent ${i}`, ownerId: "owner-a" });
+      }
+      const list = await store.listByOwner("owner-a", 999);
+      assert.equal(list.length, 5); // only 5 exist, all returned
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  test(`${name}: listByOwner negative limit clamps to 1`, async () => {
+    const { store, cleanup } = makeStore();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await store.create({ displayName: `Agent ${i}`, ownerId: "owner-a" });
+      }
+      const list = await store.listByOwner("owner-a", -10);
+      assert.equal(list.length, 1);
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  test(`${name}: listByCapability limit=0 clamps to 1`, async () => {
+    const { store, cleanup } = makeStore();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await store.create({
+          displayName: `Agent ${i}`,
+          ownerId: "owner-a",
+          capabilities: ["payment"],
+        });
+      }
+      const list = await store.listByCapability("owner-a", "payment", 0);
+      assert.equal(list.length, 1);
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  test(`${name}: listByCapability negative limit clamps to 1`, async () => {
+    const { store, cleanup } = makeStore();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await store.create({
+          displayName: `Agent ${i}`,
+          ownerId: "owner-a",
+          capabilities: ["payment"],
+        });
+      }
+      const list = await store.listByCapability("owner-a", "payment", -5);
+      assert.equal(list.length, 1);
+    } finally {
+      cleanup?.();
+    }
+  });
 }
 
 testStores("InMemoryAgentStore", () => ({

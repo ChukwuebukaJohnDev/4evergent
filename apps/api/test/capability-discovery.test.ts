@@ -289,6 +289,221 @@ function runApiCapabilityTests(backendName: string, makeStore: () => { store: In
       cleanup?.();
     }
   });
+
+  test(`${backendName}: default limit is ${MAX_LIMIT} when parameter is omitted`, async () => {
+    clearAgents();
+    const { store, cleanup } = makeStore();
+    const server = await createApiServer({
+      port: 0,
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      signer: makeSigner("GTEST"),
+      agentStore: store,
+      authProvider: new DevAuthProvider({ defaultOwnerId: "owner-a" }),
+    });
+    await server.listen(0);
+    const baseUrl = `http://127.0.0.1:${(server.server.address() as any).port}`;
+
+    try {
+      // Create 3 agents
+      for (let i = 0; i < 3; i++) {
+        await post(`${baseUrl}/agents`, {
+          displayName: `Agent ${i}`,
+          capabilities: ["payment"],
+        });
+      }
+
+      // No limit param → all agents returned (up to MAX_LIMIT=200 default)
+      const res = await get(`${baseUrl}/agents?capability=payment`);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.agents.length, 3);
+
+      const resNoCapability = await get(`${baseUrl}/agents`);
+      assert.equal(resNoCapability.status, 200);
+      assert.equal(resNoCapability.body.agents.length, 3);
+    } finally {
+      await server.close();
+      cleanup?.();
+    }
+  });
+
+  test(`${backendName}: limit=0 clamps to 1`, async () => {
+    clearAgents();
+    const { store, cleanup } = makeStore();
+    const server = await createApiServer({
+      port: 0,
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      signer: makeSigner("GTEST"),
+      agentStore: store,
+      authProvider: new DevAuthProvider({ defaultOwnerId: "owner-a" }),
+    });
+    await server.listen(0);
+    const baseUrl = `http://127.0.0.1:${(server.server.address() as any).port}`;
+
+    try {
+      for (let i = 0; i < 5; i++) {
+        await post(`${baseUrl}/agents`, {
+          displayName: `Agent ${i}`,
+          capabilities: ["payment"],
+        });
+      }
+
+      const res = await get(`${baseUrl}/agents?capability=payment&limit=0`);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.agents.length, 1);
+
+      const resNoCapability = await get(`${baseUrl}/agents?limit=0`);
+      assert.equal(resNoCapability.status, 200);
+      assert.equal(resNoCapability.body.agents.length, 1);
+    } finally {
+      await server.close();
+      cleanup?.();
+    }
+  });
+
+  test(`${backendName}: limit exceeding MAX_LIMIT clamps to ${MAX_LIMIT}`, async () => {
+    clearAgents();
+    const { store, cleanup } = makeStore();
+    const server = await createApiServer({
+      port: 0,
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      signer: makeSigner("GTEST"),
+      agentStore: store,
+      authProvider: new DevAuthProvider({ defaultOwnerId: "owner-a" }),
+    });
+    await server.listen(0);
+    const baseUrl = `http://127.0.0.1:${(server.server.address() as any).port}`;
+
+    try {
+      // Create 3 agents — fewer than MAX_LIMIT, so we just verify no error
+      for (let i = 0; i < 3; i++) {
+        await post(`${baseUrl}/agents`, {
+          displayName: `Agent ${i}`,
+          capabilities: ["payment"],
+        });
+      }
+
+      const res = await get(`${baseUrl}/agents?capability=payment&limit=999`);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.agents.length, 3);
+    } finally {
+      await server.close();
+      cleanup?.();
+    }
+  });
+
+  test(`${backendName}: negative limit clamps to 1`, async () => {
+    clearAgents();
+    const { store, cleanup } = makeStore();
+    const server = await createApiServer({
+      port: 0,
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      signer: makeSigner("GTEST"),
+      agentStore: store,
+      authProvider: new DevAuthProvider({ defaultOwnerId: "owner-a" }),
+    });
+    await server.listen(0);
+    const baseUrl = `http://127.0.0.1:${(server.server.address() as any).port}`;
+
+    try {
+      for (let i = 0; i < 3; i++) {
+        await post(`${baseUrl}/agents`, {
+          displayName: `Agent ${i}`,
+          capabilities: ["payment"],
+        });
+      }
+
+      const res = await get(`${baseUrl}/agents?capability=payment&limit=-5`);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.agents.length, 1);
+    } finally {
+      await server.close();
+      cleanup?.();
+    }
+  });
+
+  test(`${backendName}: fractional limit (e.g. 1.5) returns 400 VALIDATION_ERROR`, async () => {
+    clearAgents();
+    const { store, cleanup } = makeStore();
+    const server = await createApiServer({
+      port: 0,
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      signer: makeSigner("GTEST"),
+      agentStore: store,
+      authProvider: new DevAuthProvider({ defaultOwnerId: "owner-a" }),
+    });
+    await server.listen(0);
+    const baseUrl = `http://127.0.0.1:${(server.server.address() as any).port}`;
+
+    try {
+      const res = await get(`${baseUrl}/agents?limit=1.5`);
+      assert.equal(res.status, 400);
+      assert.equal(res.body.code, "VALIDATION_ERROR");
+      assert.ok(res.body.error.includes("integer"));
+
+      const resCap = await get(`${baseUrl}/agents?capability=payment&limit=2.7`);
+      assert.equal(resCap.status, 400);
+      assert.equal(resCap.body.code, "VALIDATION_ERROR");
+    } finally {
+      await server.close();
+      cleanup?.();
+    }
+  });
+
+  test(`${backendName}: non-numeric limit (e.g. "abc") returns 400 VALIDATION_ERROR`, async () => {
+    clearAgents();
+    const { store, cleanup } = makeStore();
+    const server = await createApiServer({
+      port: 0,
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      signer: makeSigner("GTEST"),
+      agentStore: store,
+      authProvider: new DevAuthProvider({ defaultOwnerId: "owner-a" }),
+    });
+    await server.listen(0);
+    const baseUrl = `http://127.0.0.1:${(server.server.address() as any).port}`;
+
+    try {
+      const res = await get(`${baseUrl}/agents?limit=abc`);
+      assert.equal(res.status, 400);
+      assert.equal(res.body.code, "VALIDATION_ERROR");
+      assert.ok(res.body.error.includes("integer"));
+
+      const resCap = await get(`${baseUrl}/agents?capability=payment&limit=xyz`);
+      assert.equal(resCap.status, 400);
+      assert.equal(resCap.body.code, "VALIDATION_ERROR");
+    } finally {
+      await server.close();
+      cleanup?.();
+    }
+  });
+
+  test(`${backendName}: empty limit (limit=) returns 400 VALIDATION_ERROR`, async () => {
+    clearAgents();
+    const { store, cleanup } = makeStore();
+    const server = await createApiServer({
+      port: 0,
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      signer: makeSigner("GTEST"),
+      agentStore: store,
+      authProvider: new DevAuthProvider({ defaultOwnerId: "owner-a" }),
+    });
+    await server.listen(0);
+    const baseUrl = `http://127.0.0.1:${(server.server.address() as any).port}`;
+
+    try {
+      const res = await get(`${baseUrl}/agents?limit=`);
+      assert.equal(res.status, 400);
+      assert.equal(res.body.code, "VALIDATION_ERROR");
+      assert.ok(res.body.error.includes("integer"));
+
+      const resCap = await get(`${baseUrl}/agents?capability=payment&limit=`);
+      assert.equal(resCap.status, 400);
+      assert.equal(resCap.body.code, "VALIDATION_ERROR");
+    } finally {
+      await server.close();
+      cleanup?.();
+    }
+  });
 }
 
 runApiCapabilityTests("InMemoryAgentStore", () => ({
