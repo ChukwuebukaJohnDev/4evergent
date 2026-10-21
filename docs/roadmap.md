@@ -162,7 +162,11 @@
 - **Crash recovery query** (`packages/database/src/execution-types.ts`, `execution-store.ts`): `ExecutionStore.listStuckExecuting()` returns records with `status === "executing"` ordered by `created_at ASC`; implemented in both InMemory and SQLite stores
 - **ExecutionRecoveryService** (`apps/api/src/execution-recovery.ts`): startup recovery service with `recover()` method — scans stuck executions, re-fetches each for idempotency guard, transitions to `failed` with immediate `nextRetryAt`, preserves `attempt`/`errorClass`, does NOT create duplicates, does NOT execute transactions
 - **Startup lifecycle** (`apps/api/src/index.ts`): `createApiServer()` is now `async`; recovery runs BEFORE queue worker starts eliminating race condition (store init → recovery scan → worker start); all test files updated to `await createApiServer()`; `recoveryService` exposed via return value
-- **ADR-012** updated in `docs/architecture.md` with crash recovery details
+- **Scheduler crash recovery query** (`packages/database/src/schedule-types.ts`, `schedule-store.ts`): `ScheduleStore.listInterrupted()` returns schedules left with in-progress marker `lastStartedAt IS NOT NULL` ordered oldest-first; supported in both InMemory and SQLite stores
+- **Schedule in-progress marker** (`apps/api/src/scheduler.ts`): `AgentScheduler.runSchedule` records `lastStartedAt` in the store before invoking `executeCallback`, and clears it to `null` upon success or failure, closing the unobservable crash window between callback and bookkeeping
+- **ScheduleRecoveryService** (`apps/api/src/schedule-recovery.ts`): startup recovery service with `recover()` method — scans interrupted schedules, re-fetches each for idempotency guard, sets `lastRunAt` to `lastStartedAt`, clears `lastStartedAt` to `null`, advances `nextRunAt` to the next future occurrence (or pauses if unadvanceable), preventing duplicate payment execution
+- **Startup lifecycle** (`apps/api/src/index.ts`): `createApiServer()` is now `async`; queue recovery runs BEFORE queue worker starts, and schedule recovery runs BEFORE scheduler starts ticking; `recoveryService` and `scheduleRecoveryService` exposed via return value
+- **ADR-012** updated in `docs/architecture.md` with execution queue and scheduler crash recovery details
 - 10 new tests (executing→failed, retry count preserved, terminal states untouched, no duplicates, idempotent second call, queue reprocesses recovered record, owner isolation, queue disabled no worker, nextRetryAt immediately eligible, startedAt cleared)
 
 ## Phase 2 Details (Shipped)

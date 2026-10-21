@@ -12,7 +12,17 @@ export class AgentScheduler {
   private maxLatenessMs: number;
 
   constructor(
-    private scheduleStore: { get(id: string): Promise<ScheduleRecord | null>; listDue(before: string, limit?: number): Promise<ScheduleRecord[]>; update(id: string, patch: Partial<ScheduleRecord>): Promise<ScheduleRecord | null>; delete(id: string): Promise<boolean> },
+    private scheduleStore: {
+      get(id: string): Promise<ScheduleRecord | null>;
+      listDue(before: string, limit?: number): Promise<ScheduleRecord[]>;
+      update(id: string, patch: Partial<ScheduleRecord>): Promise<ScheduleRecord | null>;
+      updateIfLastStartedAt?(
+        id: string,
+        expectedLastStartedAt: string | null,
+        patch: Partial<ScheduleRecord>
+      ): Promise<ScheduleRecord | null>;
+      delete(id: string): Promise<boolean>;
+    },
     private agentStore: { get(id: string): Promise<AgentInfo | null> },
     private executeCallback: (schedule: ScheduleRecord, ctx: ExecutionContext) => Promise<ScheduleExecutionResult>,
     config: SchedulerConfig = {}
@@ -51,8 +61,11 @@ export class AgentScheduler {
       const agent = await this.agentStore.get(schedule.agentId);
       if (!agent || agent.status !== "active") continue;
 
-      // Duplicate trigger guard: skip if already ran at this exact timestamp
+      // Duplicate trigger guard: skip if already ran or in-flight at this exact timestamp
       if (schedule.lastRunAt && schedule.lastRunAt === now) continue;
+      if (schedule.lastStartedAt && schedule.lastStartedAt === now) continue;
+      // In-flight guard: do not re-trigger a schedule that has a run in-flight
+      if (schedule.lastStartedAt) continue;
 
       const scheduledAt = Date.parse(schedule.nextRunAt);
       const latenessMs = Date.parse(now) - scheduledAt;
@@ -78,8 +91,10 @@ export class AgentScheduler {
       }
 
       try {
-        await this.runSchedule(schedule, now);
-        executed++;
+        const ran = await this.runSchedule(schedule, now);
+        if (ran) {
+          executed++;
+        }
       } catch (err) {
         console.error(`[scheduler] schedule ${schedule.id} failed:`, err);
       }
@@ -104,19 +119,70 @@ export class AgentScheduler {
     }, this.intervalMs);
   }
 
-  private async runSchedule(schedule: ScheduleRecord, nowIso: string): Promise<void> {
+  private async atomicUpdateIfStartedAt(
+    id: string,
+    expectedLastStartedAt: string | null,
+    patch: Partial<ScheduleRecord>
+  ): Promise<ScheduleRecord | null> {
+    if (this.scheduleStore.updateIfLastStartedAt) {
+      return this.scheduleStore.updateIfLastStartedAt(id, expectedLastStartedAt, patch);
+    }
+    const current = await this.scheduleStore.get(id);
+    if (!current) return null;
+    if ((current.lastStartedAt ?? null) !== expectedLastStartedAt) return null;
+    return this.scheduleStore.update(id, patch);
+  }
+
+  private async runSchedule(schedule: ScheduleRecord, nowIso: string): Promise<boolean> {
+    // Phase 10: Record in-progress marker via atomic CAS before executing callback to close the crash-window
+    // and prevent concurrent execution.
+    const claimed = await this.atomicUpdateIfStartedAt(schedule.id, null, { lastStartedAt: nowIso });
+    if (!claimed) {
+      return false;
+    }
+
+    const nowDate = new Date(nowIso);
+
     try {
       await this.executeCallback(schedule, { executedAt: nowIso });
 
       const { validateScheduleExpression } = await import("@4evergent/database");
-      const result = validateScheduleExpression(schedule.scheduleExpression, schedule.timezone);
+      const result = validateScheduleExpression(schedule.scheduleExpression, schedule.timezone, nowDate);
 
-      await this.scheduleStore.update(schedule.id, {
+      await this.atomicUpdateIfStartedAt(schedule.id, nowIso, {
         lastRunAt: nowIso,
+        lastStartedAt: null,
         ...(result.valid ? { nextRunAt: result.nextRunAt ?? schedule.nextRunAt } : {}),
       });
+      return true;
     } catch (err) {
-      await this.scheduleStore.update(schedule.id, { lastRunAt: nowIso });
+      // Reconcile failed occurrence: advance nextRunAt to the next future occurrence so that
+      // the occurrence is not retriggered on the next tick (preventing duplicate transaction submission),
+      // while preserving the distinction between callback failure and confirmed on-chain transaction status.
+      const { validateScheduleExpression } = await import("@4evergent/database");
+      const result = validateScheduleExpression(schedule.scheduleExpression, schedule.timezone, nowDate);
+
+      const nextRunAt =
+        result.valid && result.nextRunAt && Date.parse(result.nextRunAt) > Date.parse(nowIso)
+          ? result.nextRunAt
+          : (result.valid && result.nextRunAt ? result.nextRunAt : null);
+
+      if (nextRunAt) {
+        await this.atomicUpdateIfStartedAt(schedule.id, nowIso, {
+          lastRunAt: nowIso,
+          lastStartedAt: null,
+          nextRunAt,
+        });
+      } else {
+        await this.atomicUpdateIfStartedAt(schedule.id, nowIso, {
+          lastRunAt: nowIso,
+          lastStartedAt: null,
+          status: "paused",
+        });
+        console.error(
+          `[scheduler] paused schedule ${schedule.id} after callback failure: could not compute a future occurrence`
+        );
+      }
       throw err;
     }
   }

@@ -92,7 +92,7 @@ All decisions recorded via the ADR-lite convention. Each entry: **Status | Conte
 - Bounded retries: max 3 (configurable) after which execution moves to `dead_letter`
 - Duplicate safety: atomic conditional update CAS (`updateIfStatus(queued→executing)`) ensures only one worker can claim a queued execution
 - Owner-scoped: all execution records are tied to `ownerId`, endpoints enforce owner isolation via `getForOwner/listByOwner`
-- Recovery: `ExecutionRecoveryService` scans stuck `executing` records on startup and re-queues them via `nextRetryAt`
+- Recovery: `ExecutionRecoveryService` scans stuck `executing` records on startup and re-queues them via `nextRetryAt`; `ScheduleRecoveryService` reconciles interrupted schedule runs before the scheduler ticks (ADR-022)
 - Approval boundary: execution records carry `approvalId`; the queue does NOT bypass approval — it only executes after approval has been recorded
 
 **Consequences:**
@@ -101,7 +101,7 @@ All decisions recorded via the ADR-lite convention. Each entry: **Status | Conte
 - Permanent failures are visible in `dead_letter` for manual intervention
 - Scheduler (Phase 8) and approval flow both enqueue through the same queue
 - Exactly-once is not guaranteed (single-process SQLite provides at-most-once deduplication via atomic status claims); document as known limitation
-- Recovery: `ExecutionRecoveryService` scans stuck `executing` records on startup and re-queues them via `nextRetryAt`
+- Recovery: `ExecutionRecoveryService` scans stuck `executing` records on startup and re-queues them via `nextRetryAt`; `ScheduleRecoveryService` reconciles interrupted schedule runs before the scheduler ticks (ADR-022)
 
 ## ADR-013: Agent Self-Serve Creation
 
@@ -219,3 +219,26 @@ When `AUTH_TRUST_PROXY=1` is enabled, the trusted reverse proxy MUST be configur
 - Shedding over-limit requests before scrypt prevents CPU DoS, but means locked-out sources cannot reset until the window expires.
 - The existing `401 invalid_credentials` response and user-enumeration defence are unchanged.
 
+## ADR-022: Interrupted Schedule Run Detection & Crash Recovery
+
+**Status:** Accepted
+
+**Context:** The scheduler executes value-moving agent work on recurring cron-like expressions. If a process terminates mid-execution while `executeCallback` is in flight (before `lastRunAt` and `nextRunAt` are updated), the schedule record on disk remains with its old `nextRunAt`. Upon restart, the scheduler treats the occurrence as never executed and runs it a second time, risking a double spend.
+
+**Decision:**
+- Record an in-progress marker (`lastStartedAt`) in `ScheduleRecord` before invoking the callback.
+- On successful completion: write `lastRunAt`, advance `nextRunAt`, and clear `lastStartedAt: null` in a single store update.
+- On callback failure: write `lastRunAt`, clear `lastStartedAt: null`, and rethrow (preserving the existing failure path).
+- On server restart: run `ScheduleRecoveryService` before the scheduler starts ticking. The service scans for interrupted schedules (`lastStartedAt IS NOT NULL`), sets `lastRunAt` to `lastStartedAt`, advances `nextRunAt` to the next future occurrence (or pauses if the expression cannot advance), and clears `lastStartedAt: null` atomically via compare-and-swap (`updateIfLastStartedAt`).
+- Bounded recovery: recovery scans in batches and paginates through all interrupted schedules, ensuring systems with >50 interrupted records are completely reconciled.
+- Strict startup dependency: if recovery fails or encounters record errors, the scheduler is not started, preventing inadvertent retriggering.
+- Transaction-submission recovery semantics: a process crash does not establish whether an in-flight transaction was accepted by the Stellar network. Recovery does NOT assume the transaction failed (re-running it could cause a duplicate transaction / double spend), nor does it assume successful on-chain finality. Instead, recovery treats the schedule occurrence as reconciled without re-triggering, advancing `nextRunAt` to the next interval. On-chain transaction status reconciliation is handled independently by the `TransactionStatusReconciler` / execution store pipeline.
+- Defend in-depth: `AgentScheduler.runDue` skips schedules with `lastStartedAt` set, preventing concurrent or repeated execution of in-flight occurrences.
+
+**Consequences:**
+- Interrupted schedule runs are safely detected and reconciled on restart without double execution or duplicate transactions.
+- Normally completed or callback-failed schedules clear the marker immediately, ensuring no false positives that would skip legitimate future occurrences.
+- State transitions are atomic and concurrency-safe via `updateIfLastStartedAt` CAS across both in-memory and SQLite stores.
+- Bounded recovery guarantees all interrupted records are reconciled across multiple pages.
+- The scheduler never starts if recovery fails or has unrecovered records.
+- Transaction finality is not conflated with process crash recovery.

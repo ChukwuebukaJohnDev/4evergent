@@ -10,6 +10,7 @@ export interface ScheduleRecord {
   timezone: string;
   nextRunAt: string;
   lastRunAt: string | null;
+  lastStartedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -20,6 +21,12 @@ export interface ScheduleStore {
   listByAgent(agentId: string, limit?: number, offset?: number): Promise<ScheduleRecord[]>;
   listByOwner(ownerId: string, limit?: number, offset?: number): Promise<ScheduleRecord[]>;
   listDue(before: string, limit?: number): Promise<ScheduleRecord[]>;
+  listInterrupted(limit?: number, offset?: number): Promise<ScheduleRecord[]>;
   update(id: string, patch: Partial<ScheduleRecord>): Promise<ScheduleRecord | null>;
+  updateIfLastStartedAt(
+    id: string,
+    expectedLastStartedAt: string | null,
+    patch: Partial<ScheduleRecord>
+  ): Promise<ScheduleRecord | null>;
   delete(id: string): Promise<boolean>;
 }
