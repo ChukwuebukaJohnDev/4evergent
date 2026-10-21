@@ -131,6 +131,29 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "capability",
+            "in": "query",
+            "required": false,
+            "description": "Filter agents by exact capability match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of agents to return (1-200)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 200
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Agents",

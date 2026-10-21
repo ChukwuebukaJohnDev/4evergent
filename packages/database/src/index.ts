@@ -434,7 +434,7 @@ export { validateScheduleExpression, validateScheduleIntent } from "./schedule-v
 export type { ScheduleValidationResult } from "./schedule-validation.js";
 
 // Agent stores + types
-export { InMemoryAgentStore, SQLiteAgentStore } from "./agent-store.js";
+export { InMemoryAgentStore, SQLiteAgentStore, MAX_LIMIT } from "./agent-store.js";
 export type { AgentStore, CreateAgentInput } from "./agent-types.js";
 
 // Policy configuration stores (Phase 28A)

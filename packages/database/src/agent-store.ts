@@ -3,7 +3,7 @@ import type { Agent } from "@4evergent/shared";
 import { getSharedConnection } from "./shared-connection.js";
 import type { AgentStore, CreateAgentInput } from "./agent-types.js";
 
-const MAX_LIMIT = 200;
+export const MAX_LIMIT = 200;
 
 /**
  * InMemoryAgentStore — process-local agent storage.
@@ -47,6 +47,18 @@ export class InMemoryAgentStore implements AgentStore {
       .filter((r) => r.ownerId === ownerId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, Math.max(1, Math.min(limit, MAX_LIMIT)));
+  }
+
+  async listByCapability(
+    ownerId: string,
+    capability: string,
+    limit = MAX_LIMIT
+  ): Promise<Agent[]> {
+    const safeLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
+    return [...this.records.values()]
+      .filter((r) => r.ownerId === ownerId && (r.capabilities ?? []).includes(capability))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, safeLimit);
   }
 
   async update(id: string, patch: Partial<Agent>): Promise<Agent | null> {
@@ -126,10 +138,10 @@ export class SQLiteAgentStore implements AgentStore {
       ownerId: input.ownerId,
       stellarAddress: input.stellarAddress ?? "",
       capabilities: input.capabilities ?? [],
-      status: "active",
+      status: input.status ?? "active",
       createdAt: now,
       updatedAt: now,
-      active: true,
+      active: (input.status ?? "active") === "active",
       metadata: {},
     };
     this.db
@@ -174,6 +186,25 @@ export class SQLiteAgentStore implements AgentStore {
     const rows = this.db
       .prepare("SELECT * FROM agents WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?")
       .all(ownerId, safeLimit) as unknown as AgentRow[];
+    return rows.map(rowToAgent);
+  }
+
+  async listByCapability(
+    ownerId: string,
+    capability: string,
+    limit = MAX_LIMIT
+  ): Promise<Agent[]> {
+    const safeLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agents
+         WHERE owner_id = ?
+           AND json_valid(capabilities_json)
+           AND EXISTS (SELECT 1 FROM json_each(agents.capabilities_json) WHERE value = ?)
+         ORDER BY created_at DESC
+         LIMIT ?`
+      )
+      .all(ownerId, capability, safeLimit) as unknown as AgentRow[];
     return rows.map(rowToAgent);
   }
 

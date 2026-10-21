@@ -190,7 +190,27 @@ Body: `{ "displayName": string (required, ≤100 chars, trimmed), "description"?
 
 ### GET /agents
 
-List caller's agents. Returns `{ "agents": AgentRecord[] }`.
+List caller's agents, with optional filtering by capability and limit clamping.
+
+Query parameters:
+- `capability` (string, optional): Filter agents by exact capability match. Case-sensitive.
+- `limit` (number, optional): Maximum agents to return (clamped between 1 and 200, default 200).
+
+Returns `{ "agents": AgentRecord[] }`.
+
+Each returned `AgentRecord` includes its full `capabilities` string array. If no agents match the given `capability` (or the caller owns no agents), the endpoint returns `200` with `{ "agents": [] }` — never `404` or `500`.
+
+Filtering is executed directly in the store layer (both SQLite and InMemory), preserving owner isolation: a query never returns agents owned by another caller, and filtering operates across the owner's full agent set before the limit is applied.
+
+### Capability Discovery
+
+To support multi-agent capability discovery and agent-to-agent negotiation (Phase 7 prerequisite), agents advertise their capabilities as string arrays (`capabilities: string[]`), which can be queried via `GET /agents?capability=<name>`.
+
+Match semantics:
+- **Exact match**: The query matches agent capabilities exactly. Substrings or prefixes (e.g. querying `pay` to match `payment`) are rejected to avoid ambiguous matches.
+- **Case-sensitive**: Identifiers must match case exactly (`payment` does not match `Payment`).
+- **Store-level filtering**: Filtering is executed in the store query (`SQLiteAgentStore` via `EXISTS (SELECT 1 FROM json_each(agents.capabilities_json) WHERE value = ?)` and `InMemoryAgentStore` via array membership). Filtering does not rely on post-filtering a capped handler list.
+- **Empty results**: If no agents have the specified capability, returns `200` with `{ "agents": [] }`.
 
 ### GET /agents/:id
 

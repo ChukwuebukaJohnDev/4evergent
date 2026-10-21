@@ -33,6 +33,7 @@ import {
   SQLiteScheduleStore,
   SQLiteExecutionStore,
   SQLiteAgentStore,
+  MAX_LIMIT,
   SQLitePolicyConfigStore,
   assertNoSecrets,
   validateApprovalTransition,
@@ -703,7 +704,7 @@ export async function createApiServer(options: ServerOptions) {
       return handlePutPolicy(requestScopedCtx, req, res);
     }
 
-    if (method === "GET" && url === "/agents") {
+    if (method === "GET" && /^\/agents(\?.*)?$/.test(url)) {
       return handleListAgents(requestScopedCtx, req, res);
     }
     if (method === "GET" && /^\/agents\/[^/]+$/.test(url)) {
@@ -777,8 +778,29 @@ export async function createApiServer(options: ServerOptions) {
     }); // End runRequestIdContext
   });
 
-  async function handleListAgents(ctx: RequestContext, _req: any, res: any) {
-    const all = await agentStore.listByOwner(ctx.ownerId!);
+  async function handleListAgents(ctx: RequestContext, req: any, res: any) {
+    const urlObj = new URL(req.url ?? "", "http://localhost");
+    const capability = urlObj.searchParams.get("capability");
+    const hasLimit = urlObj.searchParams.has("limit");
+    const rawLimit = urlObj.searchParams.get("limit");
+
+    let limit: number | undefined;
+    if (hasLimit) {
+      // Empty string, non-numeric, or fractional values are rejected.
+      if (rawLimit === null || rawLimit.trim() === "") {
+        return apiError(res, "VALIDATION_ERROR", { message: "limit must be a valid integer" });
+      }
+      const parsed = Number(rawLimit);
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+        return apiError(res, "VALIDATION_ERROR", { message: "limit must be a valid integer" });
+      }
+      limit = Math.max(1, Math.min(MAX_LIMIT, parsed));
+    }
+
+    const all = capability !== null
+      ? await agentStore.listByCapability(ctx.ownerId!, capability, limit)
+      : await agentStore.listByOwner(ctx.ownerId!, limit);
+
     const agentList = all.map((a) => ({
       id: a.id,
       displayName: a.displayName,
