@@ -233,6 +233,14 @@ Schedules are stored in SQLite (when `dbPath` is configured) or in-memory. The s
 
 The scheduler runs an occurrence that is due now or up to five minutes late. If a process restart leaves an occurrence more than five minutes overdue, it skips that occurrence, records the skip in the scheduler log, and advances to the next cron occurrence. If the expression is invalid or cannot produce a strictly future occurrence, the scheduler pauses it and logs why; correct the expression before resuming it. Multiple missed intervals never produce a catch-up burst. Set `SCHEDULER_MAX_LATENESS_MS` to change the grace period; the default is `300000` (five minutes). The server starts the scheduler only when `SCHEDULER_ENABLED=1`.
 
+### Crash recovery & interrupted runs
+
+If a process terminates mid-execution while a schedule callback is in flight, the run leaves an in-progress marker (`lastStartedAt`) recorded atomically via compare-and-swap before the callback begins. On restart, `ScheduleRecoveryService` scans for interrupted schedules before the scheduler's first tick using bounded pagination (handling any number of interrupted schedules across batches): it sets `lastRunAt` to `lastStartedAt`, advances `nextRunAt` to the next future occurrence (or pauses if the expression cannot advance), and clears the in-progress marker via atomic CAS.
+
+**Transaction-submission semantics:** A process crash does not establish whether an in-flight transaction was accepted by the Stellar network. Recovery does NOT assume the transaction failed and never re-submits the interrupted callback (preventing double spends), nor does it fabricate on-chain success. Instead, the occurrence is reconciled by advancing to the next window; on-chain status verification remains the responsibility of the transaction reconciler and execution queue.
+
+**Safety guarantee:** If recovery fails or encounters errors, the scheduler does not start, ensuring that interrupted schedules are never inadvertently retriggered.
+
 ## Operator CLI
 
 The `4evergent` CLI is an operator client that talks HTTP to the API server.

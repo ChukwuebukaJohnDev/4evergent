@@ -6,7 +6,7 @@ export interface ScheduleValidationResult {
   nextRunAt?: string;
 }
 
-export function validateScheduleExpression(expression?: string, timezone?: string): ScheduleValidationResult {
+export function validateScheduleExpression(expression?: string, timezone?: string, from?: Date): ScheduleValidationResult {
   if (!expression || expression.trim().length === 0) return { valid: false, error: 'schedule expression is required' };
   if (!timezone || !isValidTimezone(timezone)) return { valid: false, error: 'invalid timezone' };
 
@@ -25,7 +25,7 @@ export function validateScheduleExpression(expression?: string, timezone?: strin
   if (!isValidCronField(month, 1, 12)) return { valid: false, error: 'invalid month' };
   if (!isValidCronField(dow, 0, 6)) return { valid: false, error: 'invalid day-of-week' };
 
-  const nextRunAt = computeNextRun(minute, hour, dom, month, dow);
+  const nextRunAt = computeNextRun(minute, hour, dom, month, dow, from);
   if (!nextRunAt) return { valid: false, error: 'could not compute next run time' };
 
   return { valid: true, nextRunAt };
@@ -64,8 +64,8 @@ function isValidTimezone(tz: string): boolean {
   return ['UTC', 'America/New_York', 'Europe/London', 'Asia/Tokyo'].includes(tz);
 }
 
-function computeNextRun(minute: string, hour: string, dom: string, month: string, dow: string): string | null {
-  const now = new Date();
+function computeNextRun(minute: string, hour: string, dom: string, month: string, dow: string, from?: Date): string | null {
+  const now = from ?? new Date();
   const candidate = new Date(now);
   candidate.setSeconds(0, 0);
 

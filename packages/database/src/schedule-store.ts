@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import type { AgentIntent } from "@4evergent/shared";
 import type { ScheduleStore, ScheduleRecord } from "./schedule-types.js";
-import { getSharedConnection } from "./shared-connection.js";
+import { getSharedConnection, closeSharedConnection } from "./shared-connection.js";
 import { clampOffset, clampLimit } from "./pagination.js";
 
 /**
@@ -13,8 +13,12 @@ export class InMemoryScheduleStore implements ScheduleStore {
   private records = new Map<string, ScheduleRecord>();
 
   async create(record: ScheduleRecord): Promise<ScheduleRecord> {
-    this.records.set(record.id, record);
-    return record;
+    const rec: ScheduleRecord = {
+      ...record,
+      lastStartedAt: record.lastStartedAt ?? null,
+    };
+    this.records.set(rec.id, rec);
+    return rec;
   }
 
   async get(id: string): Promise<ScheduleRecord | null> {
@@ -44,10 +48,45 @@ export class InMemoryScheduleStore implements ScheduleStore {
       .slice(0, limit);
   }
 
+  async listInterrupted(limit = 50, offset = 0): Promise<ScheduleRecord[]> {
+    const safeOffset = clampOffset(offset);
+    return [...this.records.values()]
+      .filter((r) => r.lastStartedAt !== null && r.lastStartedAt !== undefined)
+      .sort((a, b) => (a.lastStartedAt ?? "").localeCompare(b.lastStartedAt ?? ""))
+      .slice(safeOffset, safeOffset + clampLimit(limit, 50));
+  }
+
   async update(id: string, patch: Partial<ScheduleRecord>): Promise<ScheduleRecord | null> {
     const existing = this.records.get(id);
     if (!existing) return null;
-    const updated = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    const updated: ScheduleRecord = {
+      ...existing,
+      ...patch,
+      id: existing.id,
+      lastStartedAt: patch.lastStartedAt !== undefined ? patch.lastStartedAt : (existing.lastStartedAt ?? null),
+      updatedAt: new Date().toISOString(),
+    };
+    this.records.set(id, updated);
+    return updated;
+  }
+
+  async updateIfLastStartedAt(
+    id: string,
+    expectedLastStartedAt: string | null,
+    patch: Partial<ScheduleRecord>
+  ): Promise<ScheduleRecord | null> {
+    const existing = this.records.get(id);
+    if (!existing) return null;
+    const current = existing.lastStartedAt ?? null;
+    if (current !== expectedLastStartedAt) return null;
+
+    const updated: ScheduleRecord = {
+      ...existing,
+      ...patch,
+      id: existing.id,
+      lastStartedAt: patch.lastStartedAt !== undefined ? patch.lastStartedAt : (existing.lastStartedAt ?? null),
+      updatedAt: new Date().toISOString(),
+    };
     this.records.set(id, updated);
     return updated;
   }
@@ -67,6 +106,7 @@ interface ScheduleRow {
   timezone: string;
   next_run_at: string;
   last_run_at: string | null;
+  last_started_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -83,8 +123,10 @@ interface ScheduleRow {
  */
 export class SQLiteScheduleStore implements ScheduleStore {
   private db: DatabaseSync;
+  private dbPath: string;
 
   constructor(dbPath: string) {
+    this.dbPath = dbPath;
     this.db = getSharedConnection(dbPath);
     this.initSchema();
   }
@@ -103,6 +145,7 @@ export class SQLiteScheduleStore implements ScheduleStore {
         timezone TEXT NOT NULL,
         next_run_at TEXT NOT NULL,
         last_run_at TEXT,
+        last_started_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -111,15 +154,22 @@ export class SQLiteScheduleStore implements ScheduleStore {
       CREATE INDEX IF NOT EXISTS idx_schedules_owner ON schedules(owner_id);
       CREATE INDEX IF NOT EXISTS idx_schedules_status ON schedules(status);
       CREATE INDEX IF NOT EXISTS idx_schedules_next_run ON schedules(next_run_at);
+      CREATE INDEX IF NOT EXISTS idx_schedules_last_started ON schedules(last_started_at);
     `);
+
+    try {
+      this.db.exec("ALTER TABLE schedules ADD COLUMN last_started_at TEXT");
+    } catch {
+      // Column already exists or table was created with the column
+    }
   }
 
   async create(record: ScheduleRecord): Promise<ScheduleRecord> {
     this.db
       .prepare(
         `INSERT INTO schedules
-         (id, agent_id, owner_id, status, intent_json, schedule_expression, timezone, next_run_at, last_run_at, created_at, updated_at)
-         VALUES (@id, @agent_id, @owner_id, @status, @intent_json, @schedule_expression, @timezone, @next_run_at, @last_run_at, @created_at, @updated_at)`
+         (id, agent_id, owner_id, status, intent_json, schedule_expression, timezone, next_run_at, last_run_at, last_started_at, created_at, updated_at)
+         VALUES (@id, @agent_id, @owner_id, @status, @intent_json, @schedule_expression, @timezone, @next_run_at, @last_run_at, @last_started_at, @created_at, @updated_at)`
       )
       .run({
         id: record.id,
@@ -131,10 +181,11 @@ export class SQLiteScheduleStore implements ScheduleStore {
         timezone: record.timezone,
         next_run_at: record.nextRunAt,
         last_run_at: record.lastRunAt,
+        last_started_at: record.lastStartedAt ?? null,
         created_at: record.createdAt,
         updated_at: record.updatedAt,
       });
-    return record;
+    return { ...record, lastStartedAt: record.lastStartedAt ?? null };
   }
 
   async get(id: string): Promise<ScheduleRecord | null> {
@@ -163,6 +214,15 @@ export class SQLiteScheduleStore implements ScheduleStore {
     return rows.map((r) => rowToScheduleRecord(r));
   }
 
+  async listInterrupted(limit = 50, offset = 0): Promise<ScheduleRecord[]> {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM schedules WHERE last_started_at IS NOT NULL ORDER BY last_started_at ASC LIMIT ? OFFSET ?"
+      )
+      .all(clampLimit(limit, 50), clampOffset(offset)) as unknown as ScheduleRow[];
+    return rows.map((r) => rowToScheduleRecord(r));
+  }
+
   async update(id: string, patch: Partial<ScheduleRecord>): Promise<ScheduleRecord | null> {
     const existing = await this.get(id);
     if (!existing) return null;
@@ -170,13 +230,15 @@ export class SQLiteScheduleStore implements ScheduleStore {
       ...existing,
       ...patch,
       id: existing.id,
+      lastStartedAt: patch.lastStartedAt !== undefined ? patch.lastStartedAt : existing.lastStartedAt,
       updatedAt: new Date().toISOString(),
     };
     this.db
       .prepare(
         `UPDATE schedules SET
            status = @status, intent_json = @intent_json, schedule_expression = @schedule_expression,
-           timezone = @timezone, next_run_at = @next_run_at, last_run_at = @last_run_at, updated_at = @updated_at
+           timezone = @timezone, next_run_at = @next_run_at, last_run_at = @last_run_at,
+           last_started_at = @last_started_at, updated_at = @updated_at
          WHERE id = @id`
       )
       .run({
@@ -187,8 +249,76 @@ export class SQLiteScheduleStore implements ScheduleStore {
         timezone: updated.timezone,
         next_run_at: updated.nextRunAt,
         last_run_at: updated.lastRunAt,
+        last_started_at: updated.lastStartedAt ?? null,
         updated_at: updated.updatedAt,
       });
+    return updated;
+  }
+
+  async updateIfLastStartedAt(
+    id: string,
+    expectedLastStartedAt: string | null,
+    patch: Partial<ScheduleRecord>
+  ): Promise<ScheduleRecord | null> {
+    const existing = await this.get(id);
+    if (!existing) return null;
+    const current = existing.lastStartedAt ?? null;
+    if (current !== expectedLastStartedAt) return null;
+
+    const updated: ScheduleRecord = {
+      ...existing,
+      ...patch,
+      id: existing.id,
+      lastStartedAt: patch.lastStartedAt !== undefined ? patch.lastStartedAt : existing.lastStartedAt,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (expectedLastStartedAt === null) {
+      const result = this.db
+        .prepare(
+          `UPDATE schedules SET
+             status = @status, intent_json = @intent_json, schedule_expression = @schedule_expression,
+             timezone = @timezone, next_run_at = @next_run_at, last_run_at = @last_run_at,
+             last_started_at = @last_started_at, updated_at = @updated_at
+           WHERE id = @id AND last_started_at IS NULL`
+        )
+        .run({
+          id: updated.id,
+          status: updated.status,
+          intent_json: JSON.stringify(updated.intent),
+          schedule_expression: updated.scheduleExpression,
+          timezone: updated.timezone,
+          next_run_at: updated.nextRunAt,
+          last_run_at: updated.lastRunAt,
+          last_started_at: updated.lastStartedAt ?? null,
+          updated_at: updated.updatedAt,
+        });
+      if (Number(result.changes) === 0) return null;
+      return updated;
+    }
+
+    const result = this.db
+      .prepare(
+        `UPDATE schedules SET
+           status = @status, intent_json = @intent_json, schedule_expression = @schedule_expression,
+           timezone = @timezone, next_run_at = @next_run_at, last_run_at = @last_run_at,
+           last_started_at = @last_started_at, updated_at = @updated_at
+         WHERE id = @id AND last_started_at = @expected_last_started_at`
+      )
+      .run({
+        id: updated.id,
+        status: updated.status,
+        intent_json: JSON.stringify(updated.intent),
+        schedule_expression: updated.scheduleExpression,
+        timezone: updated.timezone,
+        next_run_at: updated.nextRunAt,
+        last_run_at: updated.lastRunAt,
+        last_started_at: updated.lastStartedAt ?? null,
+        updated_at: updated.updatedAt,
+        expected_last_started_at: expectedLastStartedAt,
+      });
+
+    if (Number(result.changes) === 0) return null;
     return updated;
   }
 
@@ -198,7 +328,7 @@ export class SQLiteScheduleStore implements ScheduleStore {
   }
 
   close(): void {
-    // Shared connection — managed by closeSharedConnection() / closeAllSharedConnections()
+    closeSharedConnection(this.dbPath);
   }
 }
 
@@ -213,6 +343,7 @@ function rowToScheduleRecord(r: ScheduleRow): ScheduleRecord {
     timezone: r.timezone,
     nextRunAt: r.next_run_at,
     lastRunAt: r.last_run_at,
+    lastStartedAt: r.last_started_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

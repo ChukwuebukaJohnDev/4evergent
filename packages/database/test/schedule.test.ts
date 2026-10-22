@@ -35,6 +35,7 @@ function makeSchedule(overrides: any = {}) {
     timezone: "UTC",
     nextRunAt: new Date(Date.now() + 60000).toISOString(),
     lastRunAt: null,
+    lastStartedAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -197,6 +198,7 @@ test("SQLite: update preserves all fields except scheduleExpression and nextRunA
       timezone: "UTC",
       nextRunAt: oldNextRun,
       lastRunAt: null,
+    lastStartedAt: null,
       createdAt,
       updatedAt,
     });
@@ -235,6 +237,154 @@ test("SQLite: update preserves all fields except scheduleExpression and nextRunA
     // updatedAt should have changed (SQLiteScheduleStore sets it in update()).
     assert.notEqual(got!.updatedAt, updatedAt, "updatedAt changed");
 
+    store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("InMemory: listInterrupted returns schedules with lastStartedAt sorted oldest first", async () => {
+  const store = new InMemoryScheduleStore();
+  const normal = makeSchedule({ id: "s-normal", lastStartedAt: null });
+  const interrupted1 = makeSchedule({ id: "s-int-1", lastStartedAt: "2026-01-01T00:00:10.000Z" });
+  const interrupted2 = makeSchedule({ id: "s-int-2", lastStartedAt: "2026-01-01T00:00:05.000Z" });
+
+  await store.create(normal);
+  await store.create(interrupted1);
+  await store.create(interrupted2);
+
+  const list = await store.listInterrupted();
+  assert.equal(list.length, 2);
+  assert.equal(list[0]!.id, "s-int-2");
+  assert.equal(list[1]!.id, "s-int-1");
+});
+
+test("SQLite: listInterrupted returns schedules with lastStartedAt sorted oldest first", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "4evergent-sched-interrupted-"));
+  const path = join(dir, "test.db");
+  try {
+    const store = new SQLiteScheduleStore(path);
+    const normal = makeSchedule({ id: "s-normal", lastStartedAt: null });
+    const interrupted1 = makeSchedule({ id: "s-int-1", lastStartedAt: "2026-01-01T00:00:10.000Z" });
+    const interrupted2 = makeSchedule({ id: "s-int-2", lastStartedAt: "2026-01-01T00:00:05.000Z" });
+
+    await store.create(normal);
+    await store.create(interrupted1);
+    await store.create(interrupted2);
+
+    const list = await store.listInterrupted();
+    assert.equal(list.length, 2);
+    assert.equal(list[0]!.id, "s-int-2");
+    assert.equal(list[1]!.id, "s-int-1");
+    store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("InMemory: listInterrupted supports pagination with limit and offset", async () => {
+  const store = new InMemoryScheduleStore();
+  for (let i = 1; i <= 5; i++) {
+    await store.create(
+      makeSchedule({
+        id: `s-${i}`,
+        lastStartedAt: `2026-01-01T00:00:0${i}.000Z`,
+      })
+    );
+  }
+
+  const page1 = await store.listInterrupted(2, 0);
+  assert.equal(page1.length, 2);
+  assert.equal(page1[0]!.id, "s-1");
+  assert.equal(page1[1]!.id, "s-2");
+
+  const page2 = await store.listInterrupted(2, 2);
+  assert.equal(page2.length, 2);
+  assert.equal(page2[0]!.id, "s-3");
+  assert.equal(page2[1]!.id, "s-4");
+
+  const page3 = await store.listInterrupted(2, 4);
+  assert.equal(page3.length, 1);
+  assert.equal(page3[0]!.id, "s-5");
+});
+
+test("SQLite: listInterrupted supports pagination with limit and offset", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "4evergent-sched-pagination-"));
+  const path = join(dir, "test.db");
+  try {
+    const store = new SQLiteScheduleStore(path);
+    for (let i = 1; i <= 5; i++) {
+      await store.create(
+        makeSchedule({
+          id: `s-${i}`,
+          lastStartedAt: `2026-01-01T00:00:0${i}.000Z`,
+        })
+      );
+    }
+
+    const page1 = await store.listInterrupted(2, 0);
+    assert.equal(page1.length, 2);
+    assert.equal(page1[0]!.id, "s-1");
+    assert.equal(page1[1]!.id, "s-2");
+
+    const page2 = await store.listInterrupted(2, 2);
+    assert.equal(page2.length, 2);
+    assert.equal(page2[0]!.id, "s-3");
+    assert.equal(page2[1]!.id, "s-4");
+
+    const page3 = await store.listInterrupted(2, 4);
+    assert.equal(page3.length, 1);
+    assert.equal(page3[0]!.id, "s-5");
+    store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("InMemory: updateIfLastStartedAt succeeds on match and fails on mismatch", async () => {
+  const store = new InMemoryScheduleStore();
+  const schedule = makeSchedule({ id: "s-cas", lastStartedAt: "2026-01-01T00:00:00.000Z" });
+  await store.create(schedule);
+
+  // Mismatch should return null
+  const failed = await store.updateIfLastStartedAt("s-cas", "2026-01-01T00:00:99.000Z", {
+    lastStartedAt: null,
+  });
+  assert.equal(failed, null);
+
+  // Match should succeed and update
+  const success = await store.updateIfLastStartedAt("s-cas", "2026-01-01T00:00:00.000Z", {
+    lastStartedAt: null,
+    lastRunAt: "2026-01-01T00:00:00.000Z",
+  });
+  assert.ok(success);
+  assert.equal(success!.lastStartedAt, null);
+  assert.equal(success!.lastRunAt, "2026-01-01T00:00:00.000Z");
+});
+
+test("SQLite: updateIfLastStartedAt succeeds on match and fails on mismatch", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "4evergent-sched-cas-"));
+  const path = join(dir, "test.db");
+  try {
+    const store = new SQLiteScheduleStore(path);
+    const schedule = makeSchedule({ id: "s-cas-sqlite", lastStartedAt: "2026-01-01T00:00:00.000Z" });
+    await store.create(schedule);
+
+    // Mismatch should return null
+    const failed = await store.updateIfLastStartedAt("s-cas-sqlite", "2026-01-01T00:00:99.000Z", {
+      lastStartedAt: null,
+    });
+    assert.equal(failed, null);
+
+    // Match should succeed and update
+    const success = await store.updateIfLastStartedAt("s-cas-sqlite", "2026-01-01T00:00:00.000Z", {
+      lastStartedAt: null,
+      lastRunAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.ok(success);
+    assert.equal(success!.lastStartedAt, null);
+    assert.equal(success!.lastRunAt, "2026-01-01T00:00:00.000Z");
     store.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -17,6 +17,7 @@ import { AgentScheduler } from "./scheduler.js";
 import { ScheduleExecutionService } from "./schedule-execution.js";
 import { ExecutionQueue } from "./execution-queue.js";
 import { ExecutionRecoveryService } from "./execution-recovery.js";
+import { ScheduleRecoveryService } from "./schedule-recovery.js";
 import { TransactionStatusReconciler } from "@4evergent/stellar";
 import { AccountSequenceCoordinator } from "./account-sequence-coordinator.js";
 import type { ExecutionRecord, ExecutionStatus } from "@4evergent/database";
@@ -77,6 +78,8 @@ interface ApprovalResponse {
 }
 
 const agents = new Map<string, Agent>();
+
+export { ScheduleRecoveryService, type ScheduleRecoveryResult, type ScheduleRecoveryOptions } from "./schedule-recovery.js";
 
 export function clearAgents() {
   agents.clear();
@@ -427,9 +430,35 @@ export async function createApiServer(options: ServerOptions) {
   // --- Scheduler setup ---
   // The scheduler executes due schedules via the SAME pipeline as manual intents.
   // It is opt-in: only starts if options.scheduler.enabled is true.
+  // --- Schedule recovery setup ---
+  const scheduleRecoveryService = new ScheduleRecoveryService(schedules);
+
   let scheduler: AgentScheduler | null = null;
   if (options.scheduler?.enabled) {
-    const scheduleExecution = new ScheduleExecutionService({
+    let recoverySucceeded = false;
+    try {
+      const recoveryResult = await scheduleRecoveryService.recover();
+      if (recoveryResult.errors.length > 0) {
+        console.error(
+          `[schedule-recovery] recovery encountered ${recoveryResult.errors.length} error(s); scheduler will not be started to prevent duplicate triggers`
+        );
+      } else {
+        if (recoveryResult.found > 0) {
+          console.log(
+            `[schedule-recovery] recovered ${recoveryResult.recovered}/${recoveryResult.found} interrupted schedules`
+          );
+        }
+        recoverySucceeded = true;
+      }
+    } catch (err) {
+      console.error(
+        "[schedule-recovery] recovery failed; scheduler will not be started to prevent duplicate triggers:",
+        err
+      );
+    }
+
+    if (recoverySucceeded) {
+      const scheduleExecution = new ScheduleExecutionService({
       activityStore: store,
       approvalStore: approvals,
       getSourceAccount: async () => {
@@ -526,8 +555,9 @@ export async function createApiServer(options: ServerOptions) {
         { intervalMs: options.scheduler.intervalMs, maxLatenessMs: options.scheduler.maxLatenessMs }
       );
 
-    scheduler.start();
-    console.log("[scheduler] started, interval:", options.scheduler.intervalMs ?? 60_000, "ms");
+      scheduler.start();
+      console.log("[scheduler] started, interval:", options.scheduler.intervalMs ?? 60_000, "ms");
+    }
   }
 
   let retentionTimer: ReturnType<typeof setInterval> | null = null;
@@ -1168,6 +1198,7 @@ export async function createApiServer(options: ServerOptions) {
       timezone,
       nextRunAt: exprValidation.nextRunAt ?? now,
       lastRunAt: null,
+      lastStartedAt: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -1742,6 +1773,7 @@ export async function createApiServer(options: ServerOptions) {
     scheduler,
     executionQueue,
     recoveryService,
+    scheduleRecoveryService,
   };
 }
 
