@@ -353,147 +353,41 @@ export class ExecutionQueue {
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    const classification = errorClass ?? classifyUncaughtError(error);
-    const attempt = record.attempt + 1;
+    const attempt = current.attempt + 1;
+    const exhausted = attempt >= this.retryPolicy.maxAttempts;
+    const transient = errorClass !== "permanent";
+    const now = new Date();
 
-    // Update attempt count on the record
-    await this.store.updateIfStatus(record.id, "executing", {
+    const update: Record<string, unknown> = {
+      ...extraUpdate,
       attempt,
       error: message,
-      errorClass: classification,
-      updatedAt: new Date().toISOString(),
-      ...(extraUpdate?.activityId ? { activityId: extraUpdate.activityId } : {}),
-    } as Partial<ExecutionRecord>);
+      updatedAt: now.toISOString(),
+    };
 
-    // Decide whether to retry or move to dead_letter
-    // Use pre-check enhanced decision if preCheck is available and submittedHash exists
-    let shouldRetry = false;
-    let nextRetryAt: string | null = null;
-
-    if (this.preCheck && record.submittedHash) {
-      const decision = await this.evaluateRetryWithPreCheck(record, attempt, classification);
-      shouldRetry = decision.shouldRetry;
-      nextRetryAt = decision.nextRetryAt;
+    if (!transient || exhausted) {
+      update.status = "dead_letter";
+      update.nextRetryAt = null;
+      update.completedAt = now.toISOString();
     } else {
-      const decision = shouldRetryNow(record.id, attempt, classification, this.retryPolicy, this.nowFn);
-      shouldRetry = decision.shouldRetry;
-      nextRetryAt = decision.nextRetryAt;
+      update.status = "failed";
+      update.nextRetryAt = computeNextRetryAt(attempt, this.retryPolicy, this.nowFn()).toISOString();
     }
 
-    if (shouldRetry) {
-      await this.store.updateIfStatus(record.id, "executing", {
-        status: "failed",
-        nextRetryAt,
-      });
-    } else {
-      await this.store.updateIfStatus(record.id, "executing", {
-        status: "dead_letter",
-        nextRetryAt: null,
-        completedAt: new Date().toISOString(),
-      });
-    }
+    await this.store.updateIfStatus(record.id, "executing", update as Partial<ExecutionRecord>);
   }
+}
 
-  /**
-   * Evaluate retry decision with Horizon pre-check for ambiguous submissions.
-   * Decision matrix:
-   * - submittedHash found on-chain → NO retry (transaction exists)
-   * - network_error / ambiguous → NO blind retry (preserve state)
-   * - definitive not_found → retry only if existing policy allows
-   */
-  private async evaluateRetryWithPreCheck(
-    record: ExecutionRecord,
-    attempt: number,
-    classification: string
-  ): Promise<{ shouldRetry: boolean; nextRetryAt: string | null }> {
-    const submittedHash = record.submittedHash;
-    if (!submittedHash || !this.preCheck) {
-      // Fall back to existing policy if no pre-check available
-      return shouldRetryNow(record.id, attempt, classification, this.retryPolicy, this.nowFn);
-    }
-
-    let preCheckResult: PreCheckResult;
-    try {
-      preCheckResult = await this.preCheck(submittedHash);
-    } catch {
-      // Pre-check itself failed — treat as ambiguous, do NOT blind retry
-      return { shouldRetry: false, nextRetryAt: null };
-    }
-
-    switch (preCheckResult) {
-      case "found":
-        // Transaction exists on-chain → do NOT retry, do NOT blind resubmit
-        return { shouldRetry: false, nextRetryAt: null };
-      case "network_error":
-        // Ambiguous network state → do NOT blind retry
-        return { shouldRetry: false, nextRetryAt: null };
-      case "not_found":
-        // Only definitive not_found allows retry under existing policy
-        if (classification === "permanent") {
-          return { shouldRetry: false, nextRetryAt: null };
-        }
-        if (attempt >= this.retryPolicy.maxRetries) {
-          return { shouldRetry: false, nextRetryAt: null };
-        }
-        return { shouldRetry: true, nextRetryAt: computeNextRetryAt(attempt, this.retryPolicy, new Date()) };
-    }
-  }
+function classifyUncaughtError(err: unknown): "transient" | "permanent" {
+  if (err instanceof Error && err.name === "AbortError") return "permanent";
+  return "transient";
 }
 
 export interface ExecutionQueueOptions {
+  clock?: () => Date;
   intervalMs?: number;
   concurrency?: number;
-  clock?: () => Date;
-  now?: () => Date;
   retryPolicy?: RetryPolicy;
-  /** Pre-check function to verify transaction status before blind retry */
+  now?: () => Date;
   preCheck?: PreCheckFn;
 }
-
-function classifyUncaughtError(error: unknown): "transient" | "permanent" {
-  if (error instanceof Error) {
-    return isTransientMessage(error.message) ? ("transient" as const) : ("permanent" as const);
-  }
-  return "transient" as const;
-}
-
-const TRANSIENT_PATTERNS: (string | RegExp)[] = [
-  /network/i,
-  /fetch/i,
-  /timeout/i,
-  /econnreset/i,
-  /econnrefused/i,
-  /enotfound/i,
-  /socket/i,
-  /horizon/i,
-  /server error/i,
-  /503/,
-  /429/,
-  /account fetch error/i,
-  /transaction submission failed/i,
-];
-
-function isTransientMessage(message: string): boolean {
-  const lower = message.toLowerCase();
-  return TRANSIENT_PATTERNS.some((p) => {
-    if (typeof p === "string") return lower.includes(p);
-    return p.test(lower);
-  });
-}
-
-function shouldRetryNow(
-  _executionId: string,
-  attempt: number,
-  errorClass: string,
-  policy: RetryPolicy,
-  now: () => Date
-): { shouldRetry: boolean; nextRetryAt: string | null } {
-  if (errorClass === "permanent") {
-    return { shouldRetry: false, nextRetryAt: null };
-  }
-  if (attempt >= policy.maxRetries) {
-    return { shouldRetry: false, nextRetryAt: null };
-  }
-  return { shouldRetry: true, nextRetryAt: computeNextRetryAt(attempt, policy, now()) };
-}
-
